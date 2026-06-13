@@ -92,13 +92,15 @@ async function handleItemChange(ratingKey: string, serverUrl: string) {
   for (let user of users) {
     const userKey = cacheKey(user.id)
     const cache = stateCache.get(userKey)
-    if (!cache) continue
+    if (!cache) { console.log(`[watch-poll] No cache for user ${user.plexUsername}`); continue }
 
     const prev = cache.get(ratingKey)
-    if (!prev) continue
+    if (!prev) { console.log(`[watch-poll] Item ${ratingKey} not in cache (${cache.size} cached items)`); continue }
 
     const item = await fetchItemMetadata(serverUrl, user.plexAuthToken!, ratingKey)
-    if (!item) continue
+    if (!item) { console.log(`[watch-poll] Failed to fetch metadata for ${ratingKey}`); continue }
+
+    console.log(`[watch-poll] Item "${item.title}" (${ratingKey}): viewCount ${prev.viewCount}->${item.viewCount}, viewOffset ${prev.viewOffset}->${item.viewOffset}`)
 
     cache.set(ratingKey, {
       viewCount: item.viewCount,
@@ -111,7 +113,7 @@ async function handleItemChange(ratingKey: string, serverUrl: string) {
     const watchChanged = item.viewCount !== prev.viewCount
     const progressCleared = prev.viewOffset > 0 && item.viewOffset === 0 && item.viewCount === 0
 
-    if (!watchChanged && !progressCleared) continue
+    if (!watchChanged && !progressCleared) { console.log(`[watch-poll] No actionable change for "${item.title}"`); continue }
 
     const ids = item.ids
     if (Object.keys(ids).length === 0) continue
