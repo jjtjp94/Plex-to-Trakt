@@ -1,12 +1,16 @@
 import axios from "axios"
 import { prisma } from "./prisma.js"
 import { refreshTraktToken } from "./tokenRefresh.js"
-import { getLibrarySections, extractAllIds } from "./plexApi.js"
+import { getLibrarySections, getLibraryItems, extractAllIds } from "./plexApi.js"
 
 const TRAKT_API = process.env.TRAKT_API_URL || "https://api.trakt.tv"
-const RECENT_LIMIT = 50
 
-const viewCountCache = new Map<string, Map<string, number>>()
+interface CachedState {
+  viewCount: number
+  viewOffset: number
+}
+
+const stateCache = new Map<string, Map<string, CachedState>>()
 
 function cacheKey(userId: number) {
   return `user:${userId}`
@@ -21,16 +25,32 @@ function traktHeaders(user: any) {
   }
 }
 
-const plexHeaders = (token: string) => ({
-  "X-Plex-Token": token,
-  Accept: "application/json",
-})
+function idKeys(ids: Record<string, any>): string[] {
+  const keys: string[] = []
+  if (ids.imdb) keys.push(`imdb:${ids.imdb}`)
+  if (ids.tmdb) keys.push(`tmdb:${ids.tmdb}`)
+  if (ids.tvdb) keys.push(`tvdb:${ids.tvdb}`)
+  return keys
+}
 
-async function getRecentItems(serverUrl: string, token: string, sectionKey: string, typeNum: string): Promise<any[]> {
-  const base = serverUrl.replace(/\/$/, "")
-  const url = `${base}/library/sections/${sectionKey}/all?type=${typeNum}&sort=lastViewedAt:desc&includeGuids=1&X-Plex-Container-Start=0&X-Plex-Container-Size=${RECENT_LIMIT}`
-  const res = await axios.get(url, { headers: plexHeaders(token), timeout: 15_000 })
-  return res.data?.MediaContainer?.Metadata || []
+async function removeFromTraktPlayback(user: any, ids: Record<string, any>, title: string) {
+  const hdrs = traktHeaders(user)
+  const keys = new Set(idKeys(ids))
+  if (keys.size === 0) return
+
+  const [moviePb, episodePb] = await Promise.all([
+    axios.get(`${TRAKT_API}/sync/playback/movies`, { headers: hdrs, timeout: 15_000 }).then((r) => r.data || []).catch(() => []),
+    axios.get(`${TRAKT_API}/sync/playback/episodes`, { headers: hdrs, timeout: 15_000 }).then((r) => r.data || []).catch(() => []),
+  ])
+
+  for (const pb of [...moviePb, ...episodePb]) {
+    const pbIds = pb.movie?.ids || pb.episode?.ids || {}
+    if (idKeys(pbIds).some((k) => keys.has(k))) {
+      await axios.delete(`${TRAKT_API}/sync/playback/${pb.id}`, { headers: hdrs, timeout: 10_000 })
+      console.log(`[watch-poll] "${title}" removed from Trakt continue watching`)
+      return
+    }
+  }
 }
 
 async function pollUser(user: any, serverUrl: string) {
@@ -48,13 +68,13 @@ async function pollUser(user: any, serverUrl: string) {
     return
   }
 
-  const items: any[] = []
+  const items = []
   for (const section of sections) {
     try {
       if (section.type === "movie") {
-        items.push(...await getRecentItems(serverUrl, token, section.key, "1"))
+        items.push(...await getLibraryItems(serverUrl, token, section.key, "movie"))
       } else if (section.type === "show") {
-        items.push(...await getRecentItems(serverUrl, token, section.key, "4"))
+        items.push(...await getLibraryItems(serverUrl, token, section.key, "episode"))
       }
     } catch {
       // skip this section
@@ -62,33 +82,33 @@ async function pollUser(user: any, serverUrl: string) {
   }
 
   const userCacheKey = cacheKey(user.id)
-  if (!viewCountCache.has(userCacheKey)) {
-    const cache = new Map<string, number>()
+  if (!stateCache.has(userCacheKey)) {
+    const cache = new Map<string, CachedState>()
     for (const item of items) {
-      cache.set(String(item.ratingKey), Number(item.viewCount) || 0)
+      cache.set(item.ratingKey, { viewCount: item.viewCount, viewOffset: item.viewOffset })
     }
-    viewCountCache.set(userCacheKey, cache)
+    stateCache.set(userCacheKey, cache)
     console.log(`[watch-poll] Seeded cache with ${items.length} items`)
     return
   }
 
-  const cache = viewCountCache.get(userCacheKey)!
+  const cache = stateCache.get(userCacheKey)!
   const syncUnwatched = process.env.SYNC_UNWATCHED === "true"
 
   let changes = 0
   for (const item of items) {
-    const rk = String(item.ratingKey)
-    const currentCount = Number(item.viewCount) || 0
-    const prevCount = cache.get(rk)
+    const prev = cache.get(item.ratingKey)
+    cache.set(item.ratingKey, { viewCount: item.viewCount, viewOffset: item.viewOffset })
 
-    cache.set(rk, currentCount)
+    if (!prev) continue
 
-    if (prevCount === undefined) continue
-    if (currentCount === prevCount) continue
+    const watchChanged = item.viewCount !== prev.viewCount
+    const progressCleared = prev.viewOffset > 0 && item.viewOffset === 0 && item.viewCount === 0
+
+    if (!watchChanged && !progressCleared) continue
     changes++
-    console.log(`[watch-poll] Change detected: "${item.title}" viewCount ${prevCount} -> ${currentCount}`)
 
-    const ids = extractAllIds(item.guid, item.Guid)
+    const ids = item.ids
     if (Object.keys(ids).length === 0) continue
 
     const mdType = item.type === "movie" ? "movie" : item.type === "episode" ? "episode" : null
@@ -97,7 +117,8 @@ async function pollUser(user: any, serverUrl: string) {
     try {
       user = await refreshTraktToken(user)
 
-      if (currentCount > prevCount) {
+      if (watchChanged && item.viewCount > prev.viewCount) {
+        console.log(`[watch-poll] Change: "${item.title}" viewCount ${prev.viewCount} -> ${item.viewCount}`)
         const body = mdType === "movie"
           ? { movies: [{ ids, title: item.title }] }
           : { episodes: [{ ids, title: item.title }] }
@@ -106,7 +127,8 @@ async function pollUser(user: any, serverUrl: string) {
           timeout: 10_000,
         })
         console.log(`[watch-poll] "${item.title}" marked watched -> synced to Trakt`)
-      } else if (currentCount < prevCount && syncUnwatched) {
+      } else if (watchChanged && item.viewCount < prev.viewCount && syncUnwatched) {
+        console.log(`[watch-poll] Change: "${item.title}" viewCount ${prev.viewCount} -> ${item.viewCount}`)
         const body = mdType === "movie"
           ? { movies: [{ ids }] }
           : { episodes: [{ ids }] }
@@ -114,7 +136,12 @@ async function pollUser(user: any, serverUrl: string) {
           headers: traktHeaders(user),
           timeout: 10_000,
         })
-        console.log(`[watch-poll] "${item.title}" marked unwatched -> removed from Trakt`)
+        console.log(`[watch-poll] "${item.title}" marked unwatched -> removed from Trakt history`)
+      }
+
+      if (progressCleared) {
+        console.log(`[watch-poll] Change: "${item.title}" viewOffset ${prev.viewOffset} -> 0 (progress cleared)`)
+        await removeFromTraktPlayback(user, ids, item.title)
       }
     } catch (err: any) {
       console.warn(`[watch-poll] Failed to sync "${item.title}": ${err.message}`)
