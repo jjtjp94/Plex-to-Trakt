@@ -1,11 +1,11 @@
 import axios from "axios"
 import { prisma } from "./prisma.js"
 import { refreshTraktToken } from "./tokenRefresh.js"
-import { extractAllIds } from "./plexApi.js"
+import { getLibrarySections, extractAllIds } from "./plexApi.js"
 
 const TRAKT_API = process.env.TRAKT_API_URL || "https://api.trakt.tv"
+const RECENT_LIMIT = 50
 
-// Cache: ratingKey -> last known viewCount, per user
 const viewCountCache = new Map<string, Map<string, number>>()
 
 function cacheKey(userId: number) {
@@ -21,6 +21,18 @@ function traktHeaders(user: any) {
   }
 }
 
+const plexHeaders = (token: string) => ({
+  "X-Plex-Token": token,
+  Accept: "application/json",
+})
+
+async function getRecentItems(serverUrl: string, token: string, sectionKey: string, typeNum: string): Promise<any[]> {
+  const base = serverUrl.replace(/\/$/, "")
+  const url = `${base}/library/sections/${sectionKey}/all?type=${typeNum}&sort=lastViewedAt:desc&includeGuids=1&X-Plex-Container-Start=0&X-Plex-Container-Size=${RECENT_LIMIT}`
+  const res = await axios.get(url, { headers: plexHeaders(token), timeout: 15_000 })
+  return res.data?.MediaContainer?.Metadata || []
+}
+
 async function pollUser(user: any, serverUrl: string) {
   const token = user.plexAuthToken
   if (!token) {
@@ -28,28 +40,35 @@ async function pollUser(user: any, serverUrl: string) {
     return
   }
 
-  const url = `${serverUrl.replace(/\/$/, "")}/library/recentlyViewed?X-Plex-Token=${token}&includeGuids=1`
-  let items: any[]
+  let sections
   try {
-    const res = await axios.get(url, {
-      headers: { Accept: "application/json" },
-      timeout: 15_000,
-    })
-    items = res.data?.MediaContainer?.Metadata || []
+    sections = await getLibrarySections(serverUrl, token)
   } catch (err: any) {
     console.warn(`[watch-poll] Plex unreachable: ${err.response?.status || err.message}`)
     return
   }
 
+  const items: any[] = []
+  for (const section of sections) {
+    try {
+      if (section.type === "movie") {
+        items.push(...await getRecentItems(serverUrl, token, section.key, "1"))
+      } else if (section.type === "show") {
+        items.push(...await getRecentItems(serverUrl, token, section.key, "4"))
+      }
+    } catch {
+      // skip this section
+    }
+  }
+
   const userCacheKey = cacheKey(user.id)
   if (!viewCountCache.has(userCacheKey)) {
-    // First poll: seed cache, don't act
     const cache = new Map<string, number>()
     for (const item of items) {
       cache.set(String(item.ratingKey), Number(item.viewCount) || 0)
     }
     viewCountCache.set(userCacheKey, cache)
-    console.log(`[watch-poll] Seeded cache with ${items.length} items from recentlyViewed`)
+    console.log(`[watch-poll] Seeded cache with ${items.length} items`)
     return
   }
 
@@ -79,7 +98,6 @@ async function pollUser(user: any, serverUrl: string) {
       user = await refreshTraktToken(user)
 
       if (currentCount > prevCount) {
-        // Newly watched
         const body = mdType === "movie"
           ? { movies: [{ ids, title: item.title }] }
           : { episodes: [{ ids, title: item.title }] }
@@ -89,7 +107,6 @@ async function pollUser(user: any, serverUrl: string) {
         })
         console.log(`[watch-poll] "${item.title}" marked watched -> synced to Trakt`)
       } else if (currentCount < prevCount && syncUnwatched) {
-        // Newly unwatched
         const body = mdType === "movie"
           ? { movies: [{ ids }] }
           : { episodes: [{ ids }] }
