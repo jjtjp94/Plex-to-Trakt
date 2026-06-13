@@ -394,14 +394,18 @@ async function syncPlayback(user: any, allPlexItems: PlexItem[], serverUrl: stri
       : { episode: { ids: item.ids }, progress }
 
     try {
-      await axios.post(`${TRAKT_API}/scrobble/pause`, body, {
-        headers: traktHeaders(user),
-        timeout: 10_000,
-      })
+      const hdrs = traktHeaders(user)
+      // Start a watching session then immediately pause to save the resume point
+      await axios.post(`${TRAKT_API}/scrobble/start`, body, { headers: hdrs, timeout: 10_000 })
+      await axios.post(`${TRAKT_API}/scrobble/pause`, body, { headers: hdrs, timeout: 10_000 })
+      console.log(`[sync]   ✓ Playback synced "${item.title}" (${progress.toFixed(1)}%) -> Trakt`)
       toTrakt++
     } catch (err: any) {
-      if (err.response?.status !== 409 && err.response?.status !== 422) {
-        console.warn(`[sync]   Failed to sync playback for "${item.title}": ${err.message}`)
+      if (err.response?.status === 409 || err.response?.status === 422) {
+        console.log(`[sync]   ✓ Playback "${item.title}" already on Trakt (${err.response.status})`)
+        toTrakt++
+      } else {
+        console.warn(`[sync]   Failed to sync playback for "${item.title}": ${err.response?.status || err.message}`)
       }
     }
   }
