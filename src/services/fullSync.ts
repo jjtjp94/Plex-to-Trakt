@@ -60,9 +60,21 @@ async function syncMovies(user: any, plexMovies: PlexItem[], serverUrl: string) 
   console.log(`[sync]   Plex: ${watchedInPlex.length} watched, ${plexMovies.length} total | Trakt: ${traktWatched.length} watched`)
 
   // Plex -> Trakt
+  const alreadyInTrakt = watchedInPlex.filter(
+    (m) => idKeys(m.ids).length > 0 && idKeys(m.ids).some((k) => traktKeys.has(k))
+  )
   const toTrakt = plexMovies.filter(
     (m) => m.viewCount > 0 && idKeys(m.ids).length > 0 && !idKeys(m.ids).some((k) => traktKeys.has(k))
   )
+  console.log(`[sync]   Movies: ${alreadyInTrakt.length} already in Trakt, ${noIdMovies} no IDs, ${toTrakt.length} to push`)
+  if (toTrakt.length === 0 && watchedInPlex.length > alreadyInTrakt.length + noIdMovies) {
+    const unaccounted = watchedInPlex.filter(
+      (m) => idKeys(m.ids).length > 0 && !idKeys(m.ids).some((k) => traktKeys.has(k))
+    )
+    for (const m of unaccounted) {
+      console.log(`[sync]   ⁉ Watched in Plex but not matching Trakt: "${m.title}" ids=${JSON.stringify(m.ids)}`)
+    }
+  }
   if (toTrakt.length > 0) {
     console.log(`[sync]   ${toTrakt.length} movie(s) Plex -> Trakt`)
     const body = { movies: toTrakt.map((m) => ({ ids: m.ids, title: m.title })) }
@@ -204,8 +216,8 @@ async function syncEpisodes(user: any, plexShows: PlexItem[], plexEpisodes: Plex
     const keys = episodeKeys(showIds, ep.parentIndex, ep.index)
     if (keys.length > 0 && !keys.some((k) => traktEpKeys.has(k))) toTrakt.push(ep)
   }
-  if (noEpIds > 0) console.log(`[sync]   ${noEpIds} watched episode(s) skipped — no episode-level IDs`)
-  if (noShowIds > 0) console.log(`[sync]   ${noShowIds} watched episode(s) skipped — parent show has no IDs`)
+  const alreadyMatchedEps = watchedEps.length - toTrakt.length - noEpIds - noShowIds
+  console.log(`[sync]   Episodes: ${alreadyMatchedEps} already in Trakt, ${noEpIds} no ep IDs, ${noShowIds} no show IDs, ${toTrakt.length} to push`)
   if (toTrakt.length > 0) {
     console.log(`[sync]   ${toTrakt.length} episode(s) Plex -> Trakt`)
     for (let i = 0; i < toTrakt.length; i += 500) {
