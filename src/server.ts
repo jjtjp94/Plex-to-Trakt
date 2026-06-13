@@ -46,6 +46,7 @@ const { default: authTraktRouter } = await import("./routes/authTrakt.js")
 const { startTokenRefreshCron } = await import("./services/tokenRefreshCron.js")
 const { startSyncScheduler } = await import("./services/syncScheduler.js")
 const { startWatchStatePoller } = await import("./services/watchStatePoller.js")
+const { runFullSync } = await import("./services/fullSync.js")
 
 const app = express()
 const PORT = 3000
@@ -78,6 +79,28 @@ app.get("/api/config", (req, res) => {
   res.json({
     externalUrl: process.env.EXTERNAL_URL || "http://localhost:3000",
   })
+})
+
+// Manual sync trigger with 10s cooldown
+let lastSyncTime = 0
+let syncRunning = false
+app.post("/api/sync", async (_req, res) => {
+  const now = Date.now()
+  if (syncRunning) return res.status(429).json({ error: "Sync already running" })
+  if (now - lastSyncTime < 10_000) {
+    const wait = Math.ceil((10_000 - (now - lastSyncTime)) / 1000)
+    return res.status(429).json({ error: `Please wait ${wait}s before syncing again` })
+  }
+  syncRunning = true
+  lastSyncTime = now
+  try {
+    await runFullSync()
+    res.json({ ok: true })
+  } catch (err: any) {
+    res.status(500).json({ error: err.message })
+  } finally {
+    syncRunning = false
+  }
 })
 
 app.get("/", (req: any, res: any) => res.sendFile(path.resolve("public/index.html")))

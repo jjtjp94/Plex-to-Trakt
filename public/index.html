@@ -97,6 +97,11 @@
       <p><code id="webhookUrl">Loading...</code></p>
 
       <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #444">
+        <button id="syncNowBtn" onclick="syncNow()">⟳ Sync Now</button>
+        <span id="syncStatus" style="margin-left: 10px"></span>
+      </div>
+
+      <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #444">
         <h3>Manage Settings</h3>
         <button onclick="showTraktSettings()" style="background: #666">Change Trakt Credentials</button>
         <button onclick="removeTraktCredentials()" style="background: #f44336; margin-left: 10px">Remove Trakt Connection</button>
@@ -309,6 +314,40 @@
         } catch (err) {
           alert("Error: " + err.message)
         }
+      }
+
+      async function syncNow() {
+        const btn = document.getElementById("syncNowBtn")
+        const status = document.getElementById("syncStatus")
+        btn.disabled = true
+        btn.style.opacity = "0.5"
+        status.innerHTML = '<span style="color: #aaa">Syncing...</span>'
+
+        try {
+          const res = await fetch("/api/sync", { method: "POST" })
+          const data = await res.json()
+          if (res.ok) {
+            status.innerHTML = '<span class="status">✓ Sync complete</span>'
+          } else {
+            status.innerHTML = `<span class="error">${data.error}</span>`
+          }
+        } catch (err) {
+          status.innerHTML = `<span class="error">Error: ${err.message}</span>`
+        }
+
+        let cooldown = 10
+        btn.textContent = `⟳ Sync Now (${cooldown}s)`
+        const timer = setInterval(() => {
+          cooldown--
+          if (cooldown <= 0) {
+            clearInterval(timer)
+            btn.disabled = false
+            btn.style.opacity = "1"
+            btn.textContent = "⟳ Sync Now"
+          } else {
+            btn.textContent = `⟳ Sync Now (${cooldown}s)`
+          }
+        }, 1000)
       }
 
       function logout() {
