@@ -45,9 +45,19 @@ async function syncMovies(user: any, plexMovies: PlexItem[], serverUrl: string) 
   }
 
   const plexByKey = new Map<string, PlexItem>()
+  let noIdMovies = 0
   for (const pm of plexMovies) {
-    for (const k of idKeys(pm.ids)) plexByKey.set(k, pm)
+    const keys = idKeys(pm.ids)
+    if (keys.length === 0 && pm.viewCount > 0) {
+      noIdMovies++
+      console.log(`[sync]   ⚠ No external IDs for watched movie: "${pm.title}" (ratingKey=${pm.ratingKey})`)
+    }
+    for (const k of keys) plexByKey.set(k, pm)
   }
+  if (noIdMovies > 0) console.log(`[sync]   ${noIdMovies} watched movie(s) skipped — no tmdb/imdb/tvdb IDs in Plex`)
+
+  const watchedInPlex = plexMovies.filter((m) => m.viewCount > 0)
+  console.log(`[sync]   Plex: ${watchedInPlex.length} watched, ${plexMovies.length} total | Trakt: ${traktWatched.length} watched`)
 
   // Plex -> Trakt
   const toTrakt = plexMovies.filter(
@@ -66,10 +76,16 @@ async function syncMovies(user: any, plexMovies: PlexItem[], serverUrl: string) 
 
   // Trakt -> Plex
   let toPlex = 0
+  let notInPlexLibrary = 0
   for (const tw of traktWatched) {
     const keys = idKeys(tw.movie?.ids || {})
     const plexItem = keys.map((k) => plexByKey.get(k)).find(Boolean)
-    if (plexItem && plexItem.viewCount <= 0) {
+    if (!plexItem) {
+      notInPlexLibrary++
+      console.log(`[sync]   ⚠ Trakt watched "${tw.movie?.title}" not found in Plex library (ids: ${JSON.stringify(tw.movie?.ids)})`)
+      continue
+    }
+    if (plexItem.viewCount <= 0) {
       try {
         await markPlexWatched(serverUrl, user.plexAuthToken, plexItem.ratingKey)
         toPlex++
@@ -80,6 +96,7 @@ async function syncMovies(user: any, plexMovies: PlexItem[], serverUrl: string) 
     }
   }
   if (toPlex > 0) console.log(`[sync]   ${toPlex} movie(s) Trakt -> Plex`)
+  if (notInPlexLibrary > 0) console.log(`[sync]   ${notInPlexLibrary} Trakt movie(s) not in Plex library (skipped)`)
 
   // Unwatched sync (opt-in): unwatched in Plex -> remove from Trakt
   let removedFromTrakt = 0
@@ -133,9 +150,16 @@ async function syncEpisodes(user: any, plexShows: PlexItem[], plexEpisodes: Plex
 
   // Map: Plex show ratingKey -> show external IDs
   const showIdsByRK = new Map<string, Record<string, any>>()
+  let showsWithoutIds = 0
   for (const show of plexShows) {
-    if (Object.keys(show.ids).length > 0) showIdsByRK.set(show.ratingKey, show.ids)
+    if (Object.keys(show.ids).length > 0) {
+      showIdsByRK.set(show.ratingKey, show.ids)
+    } else {
+      showsWithoutIds++
+      console.log(`[sync]   ⚠ No external IDs for show: "${show.title}" (ratingKey=${show.ratingKey})`)
+    }
   }
+  if (showsWithoutIds > 0) console.log(`[sync]   ${showsWithoutIds} show(s) have no IDs — their episodes will be skipped`)
 
   // Build Trakt watched episode set with composite keys
   const traktEpKeys = new Set<string>()
@@ -158,15 +182,28 @@ async function syncEpisodes(user: any, plexShows: PlexItem[], plexEpisodes: Plex
   }
 
   // Plex -> Trakt
+  const watchedEps = plexEpisodes.filter((e) => e.viewCount > 0)
+  let noShowIds = 0
+  let noEpIds = 0
+  console.log(`[sync]   Plex: ${watchedEps.length} watched episodes, ${plexEpisodes.length} total | Trakt: ${traktEpKeys.size} episode keys`)
   const toTrakt: PlexItem[] = []
   for (const ep of plexEpisodes) {
     if (ep.viewCount <= 0 || ep.parentIndex == null || ep.index == null) continue
-    if (Object.keys(ep.ids).length === 0) continue
+    if (Object.keys(ep.ids).length === 0) {
+      noEpIds++
+      continue
+    }
     const showIds = ep.grandparentRatingKey ? showIdsByRK.get(ep.grandparentRatingKey) : null
-    if (!showIds) continue
+    if (!showIds) {
+      noShowIds++
+      console.log(`[sync]   ⚠ Watched ep "${ep.grandparentTitle || '?'}" S${ep.parentIndex}E${ep.index} "${ep.title}" — parent show has no IDs`)
+      continue
+    }
     const keys = episodeKeys(showIds, ep.parentIndex, ep.index)
     if (keys.length > 0 && !keys.some((k) => traktEpKeys.has(k))) toTrakt.push(ep)
   }
+  if (noEpIds > 0) console.log(`[sync]   ${noEpIds} watched episode(s) skipped — no episode-level IDs`)
+  if (noShowIds > 0) console.log(`[sync]   ${noShowIds} watched episode(s) skipped — parent show has no IDs`)
   if (toTrakt.length > 0) {
     console.log(`[sync]   ${toTrakt.length} episode(s) Plex -> Trakt`)
     for (let i = 0; i < toTrakt.length; i += 500) {
@@ -181,13 +218,19 @@ async function syncEpisodes(user: any, plexShows: PlexItem[], plexEpisodes: Plex
 
   // Trakt -> Plex
   let toPlex = 0
+  let epsNotInPlex = 0
   for (const tw of traktWatched) {
     const showIds = tw.show?.ids || {}
     for (const season of tw.seasons || []) {
       for (const ep of season.episodes || []) {
         const keys = episodeKeys(showIds, season.number, ep.number)
         const plexEp = keys.map((k) => plexEpByComposite.get(k)).find(Boolean)
-        if (plexEp && plexEp.viewCount <= 0) {
+        if (!plexEp) {
+          epsNotInPlex++
+          console.log(`[sync]   ⚠ Trakt watched "${tw.show?.title}" S${season.number}E${ep.number} not in Plex library`)
+          continue
+        }
+        if (plexEp.viewCount <= 0) {
           try {
             await markPlexWatched(serverUrl, user.plexAuthToken, plexEp.ratingKey)
             toPlex++
@@ -200,6 +243,7 @@ async function syncEpisodes(user: any, plexShows: PlexItem[], plexEpisodes: Plex
     }
   }
   if (toPlex > 0) console.log(`[sync]   ${toPlex} episode(s) Trakt -> Plex`)
+  if (epsNotInPlex > 0) console.log(`[sync]   ${epsNotInPlex} Trakt episode(s) not in Plex library (skipped)`)
 
   // Unwatched sync for episodes (opt-in)
   if (SYNC_UNWATCHED) {
