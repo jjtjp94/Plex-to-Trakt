@@ -92,3 +92,10 @@ export async function markPlexWatched(serverUrl: string, token: string, ratingKe
     timeout: 10_000,
   })
 }
+
+export async function markPlexUnwatched(serverUrl: string, token: string, ratingKey: string): Promise<void> {
+  await axios.get(`${baseUrl(serverUrl)}/:/unscrobble?identifier=com.plexapp.plugins.library&key=${ratingKey}`, {
+    headers: plexHeaders(token),
+    timeout: 10_000,
+  })
+}

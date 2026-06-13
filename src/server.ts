@@ -45,6 +45,7 @@ const { default: authPlexRouter } = await import("./routes/authPlex.js")
 const { default: authTraktRouter } = await import("./routes/authTrakt.js")
 const { startTokenRefreshCron } = await import("./services/tokenRefreshCron.js")
 const { startSyncScheduler } = await import("./services/syncScheduler.js")
+const { startWatchStatePoller } = await import("./services/watchStatePoller.js")
 
 const app = express()
 const PORT = 3000
@@ -85,4 +86,5 @@ app.listen(PORT, () => {
   console.log(`Server listening on ${PORT}`)
   startTokenRefreshCron()
   startSyncScheduler()
+  startWatchStatePoller()
 })

@@ -13,6 +13,8 @@ Automatically sync your Plex watch history to Trakt.tv using webhooks — with *
 - 🎯 **Seek correction** (optional) — Plex webhooks don't fire when you skip around; with `PLEX_SERVER_URL` set, the app polls your Plex server during playback and corrects Trakt whenever the position drifts
 - 🛟 **Reliability fallbacks** — watches are still recorded if the stop webhook never arrives (client crash, lost webhook), and the original `/sync/history` call remains as a fallback if a scrobble fails
 - 🔄 **Bidirectional library sync** — scheduled full sync of watch history between Plex and Trakt (configurable: every 3h, 6h, 12h, or 24h). Watched in Plex but not Trakt? Added to Trakt history. Watched in Trakt but not Plex? Marked watched in Plex. Covers movies and individual episodes
+- ↩️ **Unwatched sync** (opt-in) — with `SYNC_UNWATCHED=true`, items you un-watch in Plex are also removed from Trakt history, and vice versa
+- ⚡ **Watch-state quick poller** — a lightweight poller that detects manual "Mark as Watched" / "Mark as Unwatched" in Plex and syncs to Trakt within seconds, without waiting for the next full sync
 - 🧪 **Local test harness** — mock Plex and Trakt servers so you can exercise the full scrobble lifecycle without touching real accounts
 
 ## Features
@@ -59,6 +61,8 @@ cp .env.example .env
    - *(Optional)* `PLEX_SERVER_URL`: Base URL of your Plex server (e.g., `http://192.168.1.100:32400`) — enables seek correction and full library sync
    - *(Optional)* `PLEX_TOKEN`: Plex token used for seek correction; the server owner's token can see all users' sessions
    - *(Optional)* `SYNC_INTERVAL`: How often to run bidirectional library sync — `3h`, `6h`, `12h`, `24h`, or `off`
+   - *(Optional)* `SYNC_UNWATCHED`: Set to `true` to also sync un-watched status bidirectionally (default: `false`)
+   - *(Optional)* `WATCH_POLL_INTERVAL`: Seconds between quick watch-state polls (e.g., `60`). Detects manual mark-watched/unwatched in Plex fast. Requires `PLEX_SERVER_URL`
 
 4. Build and start with Docker:
 
@@ -125,6 +129,8 @@ services:
       - PLEX_SERVER_URL=${PLEX_SERVER_URL:-}
       - PLEX_TOKEN=${PLEX_TOKEN:-}
       - SYNC_INTERVAL=${SYNC_INTERVAL:-}
+      - SYNC_UNWATCHED=${SYNC_UNWATCHED:-false}
+      - WATCH_POLL_INTERVAL=${WATCH_POLL_INTERVAL:-}
 
 volumes:
   plex-to-trakt-data:
@@ -180,6 +186,8 @@ npm run dev
 | `PLEX_SERVER_URL` | Base URL of your Plex server (e.g., http://192.168.1.100:32400). Enables seek correction and full library sync | No       |
 | `PLEX_TOKEN`      | Plex token for the seek-correction poll (the server owner's token sees all sessions). Falls back to the watching user's own token      | No       |
 | `SYNC_INTERVAL`   | Bidirectional library sync schedule: `3h`, `6h`, `12h`, `24h`, or `off` (default: disabled)                                           | No       |
+| `SYNC_UNWATCHED`  | Also sync un-watched status bidirectionally (`true`/`false`, default: `false`)                                                         | No       |
+| `WATCH_POLL_INTERVAL` | Seconds between quick watch-state polls (e.g., `60`). Detects manual mark-watched/unwatched fast. Requires `PLEX_SERVER_URL`       | No       |
 | `TRAKT_API_URL`   | Override the Trakt API base URL — only used for local testing against the mock server                                                  | No       |
 
 ### Finding Your Plex Server ID
@@ -205,8 +213,9 @@ To find your Plex server machine identifier:
    - Stop sends `scrobble/stop` — at 80%+ progress Trakt records a watched play, below that it saves resumable progress
    - Plex's 90% "scrobble" event is deferred to the real stop so the watching status isn't cleared early; a fallback timer records the watch even if the stop webhook never arrives
 4. **Seek correction** (optional): Plex webhooks don't fire on seeks. With `PLEX_SERVER_URL` set, the app polls `/status/sessions` every 15s during active playback and re-syncs Trakt when the playback position drifts (e.g., you skipped ahead) or the session disappears
-5. **Full library sync** (optional): With `SYNC_INTERVAL` and `PLEX_SERVER_URL` set, a scheduled job compares watch history between Plex and Trakt for all users and syncs the differences in both directions. An initial sync also runs on startup
-6. **Token Management**:
+5. **Full library sync** (optional): With `SYNC_INTERVAL` and `PLEX_SERVER_URL` set, a scheduled job compares watch history between Plex and Trakt for all users and syncs the differences in both directions. An initial sync also runs on startup. With `SYNC_UNWATCHED=true`, items un-watched in either platform are also synced (removed from Trakt / unmarked in Plex)
+6. **Watch-state quick poller** (optional): With `WATCH_POLL_INTERVAL` set (e.g., `60` for every 60 seconds), a lightweight poller detects when you manually mark something as watched or unwatched in Plex and syncs the change to Trakt immediately, without waiting for the next full library sync
+7. **Token Management**:
    - Access tokens are refreshed automatically when expired (24h)
    - Refresh tokens are kept alive with weekly maintenance (90d expiration)
 

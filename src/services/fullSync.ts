@@ -1,10 +1,11 @@
 import axios from "axios"
 import { prisma } from "./prisma.js"
 import { refreshTraktToken } from "./tokenRefresh.js"
-import { getLibrarySections, getLibraryItems, markPlexWatched, type PlexItem } from "./plexApi.js"
+import { getLibrarySections, getLibraryItems, markPlexWatched, markPlexUnwatched, type PlexItem } from "./plexApi.js"
 
 const TRAKT_API = process.env.TRAKT_API_URL || "https://api.trakt.tv"
 const PLEX_MARK_DELAY_MS = 100
+const SYNC_UNWATCHED = process.env.SYNC_UNWATCHED === "true"
 
 function traktHeaders(user: any) {
   return {
@@ -79,6 +80,46 @@ async function syncMovies(user: any, plexMovies: PlexItem[], serverUrl: string) 
     }
   }
   if (toPlex > 0) console.log(`[sync]   ${toPlex} movie(s) Trakt -> Plex`)
+
+  // Unwatched sync (opt-in): unwatched in Plex -> remove from Trakt
+  let removedFromTrakt = 0
+  if (SYNC_UNWATCHED) {
+    const toRemove = plexMovies.filter(
+      (m) => m.viewCount <= 0 && idKeys(m.ids).length > 0 && idKeys(m.ids).some((k) => traktKeys.has(k))
+    )
+    if (toRemove.length > 0) {
+      console.log(`[sync]   ${toRemove.length} unwatched movie(s) Plex -> removing from Trakt`)
+      const body = { movies: toRemove.map((m) => ({ ids: m.ids })) }
+      await axios.post(`${TRAKT_API}/sync/history/remove`, body, {
+        headers: traktHeaders(user),
+        timeout: 30_000,
+      })
+      removedFromTrakt = toRemove.length
+    }
+
+    // Unwatched in Trakt -> unmark in Plex
+    let unmarkedInPlex = 0
+    for (const pm of plexMovies) {
+      if (pm.viewCount <= 0) continue
+      const keys = idKeys(pm.ids)
+      if (keys.length > 0 && !keys.some((k) => traktKeys.has(k))) {
+        // This item is watched in Plex but NOT in Trakt.
+        // But we already handled Plex->Trakt above, so this could be
+        // a newly-removed item from Trakt. Only unmark if we didn't
+        // just sync it TO Trakt in this same run.
+        const justSynced = toTrakt.some((t) => t.ratingKey === pm.ratingKey)
+        if (justSynced) continue
+        try {
+          await markPlexUnwatched(serverUrl, user.plexAuthToken, pm.ratingKey)
+          unmarkedInPlex++
+          await new Promise((r) => setTimeout(r, PLEX_MARK_DELAY_MS))
+        } catch (err: any) {
+          console.warn(`[sync]   Failed to unmark "${pm.title}" in Plex: ${err.message}`)
+        }
+      }
+    }
+    if (unmarkedInPlex > 0) console.log(`[sync]   ${unmarkedInPlex} movie(s) unmarked in Plex`)
+  }
 
   return { toTrakt: toTrakt.length, toPlex }
 }
@@ -159,6 +200,53 @@ async function syncEpisodes(user: any, plexShows: PlexItem[], plexEpisodes: Plex
     }
   }
   if (toPlex > 0) console.log(`[sync]   ${toPlex} episode(s) Trakt -> Plex`)
+
+  // Unwatched sync for episodes (opt-in)
+  if (SYNC_UNWATCHED) {
+    // Unwatched in Plex -> remove from Trakt
+    const toRemove: PlexItem[] = []
+    for (const ep of plexEpisodes) {
+      if (ep.viewCount > 0 || ep.parentIndex == null || ep.index == null) continue
+      if (Object.keys(ep.ids).length === 0) continue
+      const showIds = ep.grandparentRatingKey ? showIdsByRK.get(ep.grandparentRatingKey) : null
+      if (!showIds) continue
+      const keys = episodeKeys(showIds, ep.parentIndex, ep.index)
+      if (keys.length > 0 && keys.some((k) => traktEpKeys.has(k))) toRemove.push(ep)
+    }
+    if (toRemove.length > 0) {
+      console.log(`[sync]   ${toRemove.length} unwatched episode(s) Plex -> removing from Trakt`)
+      for (let i = 0; i < toRemove.length; i += 500) {
+        const chunk = toRemove.slice(i, i + 500)
+        const body = { episodes: chunk.map((e) => ({ ids: e.ids })) }
+        await axios.post(`${TRAKT_API}/sync/history/remove`, body, {
+          headers: traktHeaders(user),
+          timeout: 30_000,
+        })
+      }
+    }
+
+    // Unwatched in Trakt -> unmark in Plex
+    let unmarkedInPlex = 0
+    for (const ep of plexEpisodes) {
+      if (ep.viewCount <= 0 || ep.parentIndex == null || ep.index == null) continue
+      const showIds = ep.grandparentRatingKey ? showIdsByRK.get(ep.grandparentRatingKey) : null
+      if (!showIds) continue
+      const keys = episodeKeys(showIds, ep.parentIndex, ep.index)
+      if (keys.length === 0) continue
+      const inTrakt = keys.some((k) => traktEpKeys.has(k))
+      if (inTrakt) continue
+      const justSynced = toTrakt.some((t) => t.ratingKey === ep.ratingKey)
+      if (justSynced) continue
+      try {
+        await markPlexUnwatched(serverUrl, user.plexAuthToken, ep.ratingKey)
+        unmarkedInPlex++
+        await new Promise((r) => setTimeout(r, PLEX_MARK_DELAY_MS))
+      } catch (err: any) {
+        console.warn(`[sync]   Failed to unmark "${ep.title}" in Plex: ${err.message}`)
+      }
+    }
+    if (unmarkedInPlex > 0) console.log(`[sync]   ${unmarkedInPlex} episode(s) unmarked in Plex`)
+  }
 
   return { toTrakt: toTrakt.length, toPlex }
 }

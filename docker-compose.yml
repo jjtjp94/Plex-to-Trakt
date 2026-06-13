@@ -24,3 +24,7 @@ services:
       - PLEX_TOKEN=${PLEX_TOKEN:-}
       # Full library sync interval: 3h, 6h, 12h, 24h, or off
       - SYNC_INTERVAL=${SYNC_INTERVAL:-}
+      # Bidirectional unwatched sync (true/false)
+      - SYNC_UNWATCHED=${SYNC_UNWATCHED:-false}
+      # Watch-state quick poller interval in seconds (e.g., 60)
+      - WATCH_POLL_INTERVAL=${WATCH_POLL_INTERVAL:-}
