@@ -367,6 +367,9 @@ async function syncPlayback(user: any, allPlexItems: PlexItem[], serverUrl: stri
     axios.get(`${TRAKT_API}/sync/playback/movies`, { headers: traktHeaders(user), timeout: 30_000 }).then((r) => r.data || []).catch(() => []),
     axios.get(`${TRAKT_API}/sync/playback/episodes`, { headers: traktHeaders(user), timeout: 30_000 }).then((r) => r.data || []).catch(() => []),
   ])
+  console.log(`[sync]   Trakt playback: ${moviePb.length} movies, ${episodePb.length} episodes`)
+  for (const pb of moviePb) console.log(`[sync]     trakt pb movie: "${pb.movie?.title}" id=${pb.id} progress=${pb.progress}%`)
+  for (const pb of episodePb) console.log(`[sync]     trakt pb episode: "${pb.show?.title}" S${pb.episode?.season}E${pb.episode?.number} "${pb.episode?.title}" id=${pb.id} progress=${pb.progress}%`)
 
   // Index Trakt playback by ID keys
   const traktPbByKey = new Map<string, { progress: number; id: number }>()
@@ -388,6 +391,8 @@ async function syncPlayback(user: any, allPlexItems: PlexItem[], serverUrl: stri
   for (const item of inProgress) {
     for (const k of idKeys(item.ids)) inProgressKeys.add(k)
   }
+  console.log(`[sync]   Plex in-progress: ${inProgress.length} items`)
+  for (const item of inProgress) console.log(`[sync]     plex ip: "${item.title}" offset=${item.viewOffset}ms / ${item.duration}ms (${((item.viewOffset/item.duration)*100).toFixed(1)}%)`)
 
   // Plex -> Trakt: push in-progress items that aren't already on Trakt (or have drifted >5%)
   let toTrakt = 0
@@ -458,11 +463,12 @@ async function syncPlayback(user: any, allPlexItems: PlexItem[], serverUrl: stri
     if (traktOffsetMs <= plexItem.viewOffset) continue
 
     try {
-      await setPlexViewOffset(serverUrl, user.plexAuthToken, plexItem.ratingKey, Math.round(traktOffsetMs))
+      await setPlexViewOffset(serverUrl, user.plexAuthToken, plexItem.ratingKey, Math.round(traktOffsetMs), plexItem.duration)
+      console.log(`[sync]   ✓ Set playback "${plexItem.title}" in Plex to ${(pb.progress).toFixed(1)}%`)
       toPlex++
       await new Promise((r) => setTimeout(r, PLEX_MARK_DELAY_MS))
     } catch (err: any) {
-      console.warn(`[sync]   Failed to set playback for "${plexItem.title}" in Plex: ${err.message}`)
+      console.warn(`[sync]   Failed to set playback for "${plexItem.title}" in Plex: ${err.response?.status} ${err.response?.statusText} (rk=${plexItem.ratingKey}, offset=${Math.round(traktOffsetMs)}, dur=${plexItem.duration})`)
     }
   }
 

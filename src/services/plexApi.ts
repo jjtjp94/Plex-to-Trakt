@@ -104,14 +104,15 @@ export async function markPlexUnwatched(serverUrl: string, token: string, rating
   })
 }
 
-export async function setPlexViewOffset(serverUrl: string, token: string, ratingKey: string, offsetMs: number): Promise<void> {
+export async function setPlexViewOffset(serverUrl: string, token: string, ratingKey: string, offsetMs: number, durationMs?: number): Promise<void> {
   const params = new URLSearchParams({
     ratingKey,
     key: `/library/metadata/${ratingKey}`,
     identifier: "com.plexapp.plugins.library",
-    time: String(offsetMs),
+    time: String(Math.round(offsetMs)),
     state: "stopped",
   })
+  if (durationMs) params.set("duration", String(Math.round(durationMs)))
   await axios.get(`${baseUrl(serverUrl)}/:/timeline?${params.toString()}`, {
     headers: plexHeaders(token),
     timeout: 10_000,
