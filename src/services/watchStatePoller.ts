@@ -46,12 +46,14 @@ async function pollUser(user: any, serverUrl: string) {
       cache.set(String(item.ratingKey), Number(item.viewCount) || 0)
     }
     viewCountCache.set(userCacheKey, cache)
+    console.log(`[watch-poll] Seeded cache with ${items.length} items from recentlyViewed`)
     return
   }
 
   const cache = viewCountCache.get(userCacheKey)!
   const syncUnwatched = process.env.SYNC_UNWATCHED === "true"
 
+  let changes = 0
   for (const item of items) {
     const rk = String(item.ratingKey)
     const currentCount = Number(item.viewCount) || 0
@@ -59,8 +61,10 @@ async function pollUser(user: any, serverUrl: string) {
 
     cache.set(rk, currentCount)
 
-    if (prevCount === undefined) continue // new item in the list, skip
+    if (prevCount === undefined) continue
     if (currentCount === prevCount) continue
+    changes++
+    console.log(`[watch-poll] Change detected: "${item.title}" viewCount ${prevCount} -> ${currentCount}`)
 
     const ids = extractAllIds(item.guid, item.Guid)
     if (Object.keys(ids).length === 0) continue
@@ -96,6 +100,7 @@ async function pollUser(user: any, serverUrl: string) {
       console.warn(`[watch-poll] Failed to sync "${item.title}": ${err.message}`)
     }
   }
+  if (changes === 0) console.log(`[watch-poll] Polled ${items.length} items, no changes`)
 }
 
 let pollTimer: NodeJS.Timeout | null = null
