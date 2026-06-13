@@ -218,9 +218,33 @@ async function syncEpisodes(user: any, plexShows: PlexItem[], plexEpisodes: Plex
     }
   }
 
+  // Build a secondary title index for fuzzy matching (handles "The Office" vs "The Office (US)")
+  const plexShowByIdKey = new Map<string, PlexItem>()
+  for (const show of plexShows) {
+    for (const k of idKeys(show.ids)) plexShowByIdKey.set(k, show)
+  }
+
+  function findPlexShow(traktTitle: string, traktIds: Record<string, any>): PlexItem | undefined {
+    // Exact title match
+    const exact = plexShowByTitle.get(traktTitle.toLowerCase())
+    if (exact) return exact
+    // Match by shared IDs (handles title differences like "The Office" vs "The Office (US)")
+    for (const k of idKeys(traktIds)) {
+      const match = plexShowByIdKey.get(k)
+      if (match) return match
+    }
+    return undefined
+  }
+
+  function idsOverlap(a: Record<string, any>, b: Record<string, any>): boolean {
+    const aKeys = idKeys(a)
+    const bSet = new Set(idKeys(b))
+    return aKeys.some((k) => bSet.has(k))
+  }
+
   // Trakt -> Plex
   let toPlex = 0
-  const missedByShow = new Map<string, { count: number; traktIds: any; plexIds?: any }>()
+  const missedByShow = new Map<string, { count: number; traktIds: any; plexShow?: PlexItem }>()
   for (const tw of traktWatched) {
     const showIds = tw.show?.ids || {}
     const showTitle = tw.show?.title || "?"
@@ -230,11 +254,10 @@ async function syncEpisodes(user: any, plexShows: PlexItem[], plexEpisodes: Plex
         const plexEp = keys.map((k) => plexEpByComposite.get(k)).find(Boolean)
         if (!plexEp) {
           if (!missedByShow.has(showTitle)) {
-            const plexMatch = plexShowByTitle.get(showTitle.toLowerCase())
             missedByShow.set(showTitle, {
               count: 0,
               traktIds: showIds,
-              plexIds: plexMatch ? plexMatch.ids : undefined,
+              plexShow: findPlexShow(showTitle, showIds),
             })
           }
           missedByShow.get(showTitle)!.count++
@@ -257,8 +280,13 @@ async function syncEpisodes(user: any, plexShows: PlexItem[], plexEpisodes: Plex
     let totalMissed = 0
     for (const [title, info] of missedByShow) {
       totalMissed += info.count
-      if (info.plexIds) {
-        console.log(`[sync]   ⚠ ID MISMATCH "${title}" (${info.count} eps) — Trakt IDs: ${JSON.stringify(info.traktIds)} vs Plex IDs: ${JSON.stringify(info.plexIds)}`)
+      if (info.plexShow) {
+        const overlap = idsOverlap(info.traktIds, info.plexShow.ids)
+        if (overlap) {
+          console.log(`[sync]   ⚠ "${title}" (${info.count} eps) — show matched in Plex as "${info.plexShow.title}", but those episodes don't exist in library`)
+        } else {
+          console.log(`[sync]   ⚠ ID MISMATCH "${title}" (${info.count} eps) — Trakt IDs: ${JSON.stringify(info.traktIds)} vs Plex "${info.plexShow.title}" IDs: ${JSON.stringify(info.plexShow.ids)}`)
+        }
       } else {
         console.log(`[sync]   ⚠ "${title}" (${info.count} eps) — not in Plex library`)
       }
