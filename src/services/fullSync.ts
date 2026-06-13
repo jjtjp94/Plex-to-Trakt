@@ -361,7 +361,6 @@ async function syncPlayback(user: any, allPlexItems: PlexItem[], serverUrl: stri
   const inProgress = allPlexItems.filter(
     (m) => m.viewOffset > 0 && m.viewCount <= 0 && m.duration > 0 && Object.keys(m.ids).length > 0
   )
-  if (inProgress.length === 0) return { toTrakt: 0, toPlex: 0 }
 
   // Get Trakt's current playback state
   const [moviePb, episodePb] = await Promise.all([
@@ -376,6 +375,18 @@ async function syncPlayback(user: any, allPlexItems: PlexItem[], serverUrl: stri
   }
   for (const pb of episodePb) {
     for (const k of idKeys(pb.episode?.ids || {})) traktPbByKey.set(k, { progress: pb.progress, id: pb.id })
+  }
+
+  // Build a lookup of all Plex items by ID key
+  const plexByIdKey = new Map<string, PlexItem>()
+  for (const item of allPlexItems) {
+    for (const k of idKeys(item.ids)) plexByIdKey.set(k, item)
+  }
+
+  // Build a set of ID keys for items currently in-progress in Plex
+  const inProgressKeys = new Set<string>()
+  for (const item of inProgress) {
+    for (const k of idKeys(item.ids)) inProgressKeys.add(k)
   }
 
   // Plex -> Trakt: push in-progress items that aren't already on Trakt (or have drifted >5%)
@@ -395,7 +406,6 @@ async function syncPlayback(user: any, allPlexItems: PlexItem[], serverUrl: stri
 
     try {
       const hdrs = traktHeaders(user)
-      // Start a watching session then immediately pause to save the resume point
       await axios.post(`${TRAKT_API}/scrobble/start`, body, { headers: hdrs, timeout: 10_000 })
       await axios.post(`${TRAKT_API}/scrobble/pause`, body, { headers: hdrs, timeout: 10_000 })
       console.log(`[sync]   ✓ Playback synced "${item.title}" (${progress.toFixed(1)}%) -> Trakt`)
@@ -410,28 +420,42 @@ async function syncPlayback(user: any, allPlexItems: PlexItem[], serverUrl: stri
     }
   }
 
-  // Trakt -> Plex: pull Trakt playback items and set resume position in Plex
-  // Build a lookup of all Plex items by ID key for matching
-  const plexByIdKey = new Map<string, PlexItem>()
-  for (const item of allPlexItems) {
-    for (const k of idKeys(item.ids)) plexByIdKey.set(k, item)
+  // Remove stale Trakt playback entries (no longer in-progress in Plex)
+  let removed = 0
+  const allTraktPb = [...moviePb, ...episodePb]
+  for (const pb of allTraktPb) {
+    const itemIds = pb.movie?.ids || pb.episode?.ids || {}
+    const title = pb.movie?.title || pb.episode?.title || "?"
+    const keys = idKeys(itemIds)
+    const plexItem = keys.map((k) => plexByIdKey.get(k)).find(Boolean)
+
+    // Remove if: item exists in Plex but is no longer in-progress (fully watched or reset)
+    const stillInProgress = keys.some((k) => inProgressKeys.has(k))
+    if (plexItem && !stillInProgress) {
+      try {
+        await axios.delete(`${TRAKT_API}/sync/playback/${pb.id}`, { headers: traktHeaders(user), timeout: 10_000 })
+        console.log(`[sync]   ✗ Removed stale playback "${title}" from Trakt`)
+        removed++
+      } catch (err: any) {
+        console.warn(`[sync]   Failed to remove playback "${title}" from Trakt: ${err.response?.status || err.message}`)
+      }
+    }
   }
 
+  // Trakt -> Plex: pull Trakt playback items and set resume position in Plex
   let toPlex = 0
-  const allTraktPb = [...moviePb, ...episodePb]
   for (const pb of allTraktPb) {
     const itemIds = pb.movie?.ids || pb.episode?.ids || {}
     const keys = idKeys(itemIds)
     const plexItem = keys.map((k) => plexByIdKey.get(k)).find(Boolean)
     if (!plexItem) continue
-    if (plexItem.viewCount > 0) continue // already fully watched
+    if (plexItem.viewCount > 0) continue
     if (plexItem.duration <= 0) continue
 
     const traktOffsetMs = (pb.progress / 100) * plexItem.duration
     const drift = Math.abs(traktOffsetMs - plexItem.viewOffset)
-    if (drift < 30_000) continue // less than 30s difference, skip
+    if (drift < 30_000) continue
 
-    // Only update if Trakt is further ahead (don't rewind)
     if (traktOffsetMs <= plexItem.viewOffset) continue
 
     try {
@@ -443,8 +467,13 @@ async function syncPlayback(user: any, allPlexItems: PlexItem[], serverUrl: stri
     }
   }
 
-  if (toTrakt > 0 || toPlex > 0) {
-    console.log(`[sync]   Playback: ${toTrakt} resume points -> Trakt, ${toPlex} -> Plex`)
+  const changes = toTrakt + toPlex + removed
+  if (changes > 0) {
+    const parts: string[] = []
+    if (toTrakt > 0) parts.push(`${toTrakt} resume points -> Trakt`)
+    if (removed > 0) parts.push(`${removed} stale removed from Trakt`)
+    if (toPlex > 0) parts.push(`${toPlex} -> Plex`)
+    console.log(`[sync]   Playback: ${parts.join(", ")}`)
   } else {
     console.log(`[sync]   Playback: ${inProgress.length} in-progress items, all in sync`)
   }
