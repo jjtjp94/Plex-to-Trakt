@@ -4,7 +4,7 @@ import { refreshTraktToken } from "./tokenRefresh.js"
 import { getLibrarySections, getLibraryItems, extractAllIds, type PlexItem } from "./plexApi.js"
 
 const TRAKT_API = process.env.TRAKT_API_URL || "https://api.trakt.tv"
-const POLL_PAGE_SIZE = 200
+const POLL_PAGE_SIZE = 10
 
 interface CachedState {
   viewCount: number
