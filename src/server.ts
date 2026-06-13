@@ -105,9 +105,9 @@ app.post("/api/sync", async (_req, res) => {
 
 app.get("/", (req: any, res: any) => res.sendFile(path.resolve("public/index.html")))
 
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`Server listening on ${PORT}`)
   startTokenRefreshCron()
   startSyncScheduler()
-  startWatchStatePoller()
+  await startWatchStatePoller()
 })
