@@ -427,11 +427,10 @@ async function syncPlayback(user: any, allPlexItems: PlexItem[], serverUrl: stri
     const itemIds = pb.movie?.ids || pb.episode?.ids || {}
     const title = pb.movie?.title || pb.episode?.title || "?"
     const keys = idKeys(itemIds)
-    const plexItem = keys.map((k) => plexByIdKey.get(k)).find(Boolean)
 
-    // Remove if: item exists in Plex but is no longer in-progress (fully watched or reset)
+    // Keep only if the item is still in-progress in Plex right now
     const stillInProgress = keys.some((k) => inProgressKeys.has(k))
-    if (plexItem && !stillInProgress) {
+    if (!stillInProgress) {
       try {
         await axios.delete(`${TRAKT_API}/sync/playback/${pb.id}`, { headers: traktHeaders(user), timeout: 10_000 })
         console.log(`[sync]   ✗ Removed stale playback "${title}" from Trakt`)
