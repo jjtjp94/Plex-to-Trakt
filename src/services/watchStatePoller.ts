@@ -23,9 +23,11 @@ function traktHeaders(user: any) {
 
 async function pollUser(user: any, serverUrl: string) {
   const token = user.plexAuthToken
-  if (!token) return
+  if (!token) {
+    console.log(`[watch-poll] User ${user.plexUsername || user.id} has no Plex token, skipping`)
+    return
+  }
 
-  // Fetch recently viewed items (Plex updates this on manual watch/unwatch)
   const url = `${serverUrl.replace(/\/$/, "")}/library/recentlyViewed?X-Plex-Token=${token}&includeGuids=1`
   let items: any[]
   try {
@@ -34,8 +36,9 @@ async function pollUser(user: any, serverUrl: string) {
       timeout: 15_000,
     })
     items = res.data?.MediaContainer?.Metadata || []
-  } catch {
-    return // Plex unreachable, skip this cycle
+  } catch (err: any) {
+    console.warn(`[watch-poll] Plex unreachable: ${err.response?.status || err.message}`)
+    return
   }
 
   const userCacheKey = cacheKey(user.id)
@@ -123,6 +126,10 @@ export function startWatchStatePoller() {
       const users = await prisma.user.findMany({
         where: { traktAccessToken: { not: null }, plexAuthToken: { not: null } },
       })
+      if (users.length === 0) {
+        console.log("[watch-poll] No users with Plex+Trakt credentials, skipping")
+        return
+      }
       for (const user of users) {
         await pollUser(user, serverUrl)
       }
