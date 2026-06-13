@@ -219,13 +219,28 @@ function connectWebSocket(serverUrl: string, token: string) {
     try {
       const data = JSON.parse(String(event.data))
       const container = data.NotificationContainer
-      if (!container || container.type !== "timeline") return
+      if (!container) return
 
-      const entries = container.TimelineEntry || []
-      for (const entry of entries) {
-        if (entry.identifier !== "com.plexapp.plugins.library") continue
-        if (!entry.itemID) continue
-        debounceItemChange(String(entry.itemID), serverUrl)
+      // Log all event types so we can see what Plex actually sends
+      console.log(`[watch-poll] WS event: type="${container.type}" size=${container.size || 0}`)
+      if (container.type === "timeline") {
+        const entries = container.TimelineEntry || []
+        for (const entry of entries) {
+          console.log(`[watch-poll]   timeline: itemID=${entry.itemID} type=${entry.type} state=${entry.state} identifier=${entry.identifier}`)
+          if (entry.identifier !== "com.plexapp.plugins.library") continue
+          if (!entry.itemID) continue
+          debounceItemChange(String(entry.itemID), serverUrl)
+        }
+      } else if (container.type === "activity") {
+        const activities = container.ActivityNotification || []
+        for (const a of activities) {
+          console.log(`[watch-poll]   activity: event="${a.event}" type=${a.Activity?.type} title="${a.Activity?.title}"`)
+        }
+      } else if (container.type === "playing") {
+        const sessions = container.PlaySessionStateNotification || []
+        for (const s of sessions) {
+          console.log(`[watch-poll]   playing: ratingKey=${s.ratingKey} state="${s.state}" viewOffset=${s.viewOffset}`)
+        }
       }
     } catch {
       // ignore malformed messages
