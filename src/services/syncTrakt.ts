@@ -20,7 +20,7 @@ export async function syncToTrakt(user: any, md: any, ids: any) {
     return // unsupported type
   }
 
-  await axios.post("https://api.trakt.tv/sync/history", body, {
+  await axios.post(`${process.env.TRAKT_API_URL || "https://api.trakt.tv"}/sync/history`, body, {
     headers: {
       "Content-Type": "application/json",
       "trakt-api-version": "2",

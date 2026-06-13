@@ -19,3 +19,6 @@ services:
       - PLEX_SERVER_IP=${PLEX_SERVER_IP}
       # Session Secret
       - SESSION_SECRET=${SESSION_SECRET}
+      # Live scrobbling: optional seek correction (see README)
+      - PLEX_SERVER_URL=${PLEX_SERVER_URL:-}
+      - PLEX_TOKEN=${PLEX_TOKEN:-}
