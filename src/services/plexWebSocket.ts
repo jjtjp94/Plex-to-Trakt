@@ -21,6 +21,8 @@ let reconnectCount = 0
 let heartbeatTimer: NodeJS.Timeout | null = null
 let lastMessageAt = 0
 let connectionState: "connected" | "reconnecting" | "disconnected" = "disconnected"
+let consecutive404s = 0
+const MAX_404_RETRIES = 3
 
 export function getWebSocketState() {
   return { connected: connectionState === "connected", state: connectionState, reconnectCount, lastMessageAt }
@@ -328,9 +330,24 @@ function connect(serverUrl: string, token: string) {
   ws.on("open", () => {
     connectionState = "connected"
     reconnectDelay = RECONNECT_BASE_MS
+    consecutive404s = 0
     console.log("[ws] Connected to Plex WebSocket")
     emitStatus()
     startHeartbeat()
+  })
+
+  ws.on("unexpected-response", (_req, res) => {
+    if (res.statusCode === 404) {
+      consecutive404s++
+      if (consecutive404s >= MAX_404_RETRIES) {
+        console.error("[ws] Plex WebSocket endpoint returned 404 repeatedly — stopping reconnection. Check that PLEX_SERVER_URL points directly to Plex (not a reverse proxy) and that the server supports WebSocket notifications.")
+        connectionState = "disconnected"
+        emitStatus()
+        ws?.close()
+        return
+      }
+      console.warn(`[ws] Plex returned 404 (attempt ${consecutive404s}/${MAX_404_RETRIES}). If this persists, the WebSocket endpoint may not be available at this URL.`)
+    }
   })
 
   ws.on("message", (raw) => {
@@ -371,6 +388,7 @@ function connect(serverUrl: string, token: string) {
 
   ws.on("close", () => {
     stopHeartbeat()
+    if (consecutive404s >= MAX_404_RETRIES) return
     connectionState = "reconnecting"
     emitStatus()
     console.log(`[ws] Disconnected, reconnecting in ${reconnectDelay / 1000}s`)

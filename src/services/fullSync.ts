@@ -90,6 +90,7 @@ async function syncMovies(user: any, plexMovies: PlexItem[], serverUrl: string) 
   // Trakt -> Plex
   let toPlex = 0
   let notInPlexLibrary = 0
+  const justMarkedWatchedInPlex = new Set<string>()
   for (const tw of traktWatched) {
     const keys = idKeys(tw.movie?.ids || {})
     const plexItem = keys.map((k) => plexByKey.get(k)).find(Boolean)
@@ -101,6 +102,7 @@ async function syncMovies(user: any, plexMovies: PlexItem[], serverUrl: string) 
     if (plexItem.viewCount <= 0) {
       try {
         await markPlexWatched(serverUrl, user.plexAuthToken, plexItem.ratingKey)
+        justMarkedWatchedInPlex.add(plexItem.ratingKey)
         toPlex++
         await new Promise((r) => setTimeout(r, PLEX_MARK_DELAY_MS))
       } catch (err: any) {
@@ -115,7 +117,7 @@ async function syncMovies(user: any, plexMovies: PlexItem[], serverUrl: string) 
   let removedFromTrakt = 0
   if (SYNC_UNWATCHED) {
     const toRemove = plexMovies.filter(
-      (m) => m.viewCount <= 0 && idKeys(m.ids).length > 0 && idKeys(m.ids).some((k) => traktKeys.has(k))
+      (m) => m.viewCount <= 0 && !justMarkedWatchedInPlex.has(m.ratingKey) && idKeys(m.ids).length > 0 && idKeys(m.ids).some((k) => traktKeys.has(k))
     )
     if (toRemove.length > 0) {
       console.log(`[sync]   ${toRemove.length} unwatched movie(s) Plex -> removing from Trakt`)
@@ -257,6 +259,7 @@ async function syncEpisodes(user: any, plexShows: PlexItem[], plexEpisodes: Plex
 
   // Trakt -> Plex
   let toPlex = 0
+  const justMarkedWatchedInPlex = new Set<string>()
   const missedByShow = new Map<string, { count: number; traktIds: any; plexShow?: PlexItem }>()
   for (const tw of traktWatched) {
     const showIds = tw.show?.ids || {}
@@ -279,6 +282,7 @@ async function syncEpisodes(user: any, plexShows: PlexItem[], plexEpisodes: Plex
         if (plexEp.viewCount <= 0) {
           try {
             await markPlexWatched(serverUrl, user.plexAuthToken, plexEp.ratingKey)
+            justMarkedWatchedInPlex.add(plexEp.ratingKey)
             toPlex++
             await new Promise((r) => setTimeout(r, PLEX_MARK_DELAY_MS))
           } catch (err: any) {
@@ -313,6 +317,7 @@ async function syncEpisodes(user: any, plexShows: PlexItem[], plexEpisodes: Plex
     const toRemove: PlexItem[] = []
     for (const ep of plexEpisodes) {
       if (ep.viewCount > 0 || ep.parentIndex == null || ep.index == null) continue
+      if (justMarkedWatchedInPlex.has(ep.ratingKey)) continue
       if (Object.keys(ep.ids).length === 0) continue
       const showIds = ep.grandparentRatingKey ? showIdsByRK.get(ep.grandparentRatingKey) : null
       if (!showIds) continue
