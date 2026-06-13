@@ -44,6 +44,7 @@ const { default: webhookRouter } = await import("./routes/webhook.js")
 const { default: authPlexRouter } = await import("./routes/authPlex.js")
 const { default: authTraktRouter } = await import("./routes/authTrakt.js")
 const { startTokenRefreshCron } = await import("./services/tokenRefreshCron.js")
+const { startSyncScheduler } = await import("./services/syncScheduler.js")
 
 const app = express()
 const PORT = 3000
@@ -83,4 +84,5 @@ app.get("/", (req: any, res: any) => res.sendFile(path.resolve("public/index.htm
 app.listen(PORT, () => {
   console.log(`Server listening on ${PORT}`)
   startTokenRefreshCron()
+  startSyncScheduler()
 })

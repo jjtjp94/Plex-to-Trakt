@@ -12,11 +12,13 @@ Automatically sync your Plex watch history to Trakt.tv using webhooks — with *
 - ⏸ **Pause/resume mirroring** — pausing in Plex saves your resume point to Trakt's playback progress, resuming restores the watching status
 - 🎯 **Seek correction** (optional) — Plex webhooks don't fire when you skip around; with `PLEX_SERVER_URL` set, the app polls your Plex server during playback and corrects Trakt whenever the position drifts
 - 🛟 **Reliability fallbacks** — watches are still recorded if the stop webhook never arrives (client crash, lost webhook), and the original `/sync/history` call remains as a fallback if a scrobble fails
+- 🔄 **Bidirectional library sync** — scheduled full sync of watch history between Plex and Trakt (configurable: every 3h, 6h, 12h, or 24h). Watched in Plex but not Trakt? Added to Trakt history. Watched in Trakt but not Plex? Marked watched in Plex. Covers movies and individual episodes
 - 🧪 **Local test harness** — mock Plex and Trakt servers so you can exercise the full scrobble lifecycle without touching real accounts
 
 ## Features
 
 - 🎬 Live scrobbling from Plex to Trakt via webhooks (watching now, pause, resume, watched)
+- 🔄 Scheduled bidirectional watch history sync between Plex and Trakt
 - 📺 Supports both movies, TV shows and Anime
 - 🔄 Automatic token refresh (access tokens every 24h, refresh tokens kept alive)
 - 🐳 Docker support for easy deployment
@@ -30,7 +32,7 @@ Automatically sync your Plex watch history to Trakt.tv using webhooks — with *
 - Plex Media Server with Plex Pass (required for webhooks)
 - Trakt.tv account (a free account is fine — scrobbling does not require VIP)
 - Trakt API application credentials ([Create one here](https://trakt.tv/oauth/applications))
-- *(Optional, for seek correction)* Your Plex server's URL and a Plex token ([how to find your token](https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/))
+- *(Optional, for seek correction and full library sync)* Your Plex server's URL and a Plex token ([how to find your token](https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/))
 
 ## Quick Start with Docker
 
@@ -54,8 +56,9 @@ cp .env.example .env
    - `PLEX_SERVER_ID`: Your Plex server machine identifier (for server access verification)
    - `PLEX_SERVER_IP`: Your Plex server IP address (for webhook security)
    - `SESSION_SECRET`: A random secret string for session encryption
-   - *(Optional)* `PLEX_SERVER_URL`: Base URL of your Plex server (e.g., `http://192.168.1.100:32400`) — enables seek correction
+   - *(Optional)* `PLEX_SERVER_URL`: Base URL of your Plex server (e.g., `http://192.168.1.100:32400`) — enables seek correction and full library sync
    - *(Optional)* `PLEX_TOKEN`: Plex token used for seek correction; the server owner's token can see all users' sessions
+   - *(Optional)* `SYNC_INTERVAL`: How often to run bidirectional library sync — `3h`, `6h`, `12h`, `24h`, or `off`
 
 4. Build and start with Docker:
 
@@ -121,6 +124,7 @@ services:
       - SESSION_SECRET=${SESSION_SECRET}
       - PLEX_SERVER_URL=${PLEX_SERVER_URL:-}
       - PLEX_TOKEN=${PLEX_TOKEN:-}
+      - SYNC_INTERVAL=${SYNC_INTERVAL:-}
 
 volumes:
   plex-to-trakt-data:
@@ -173,8 +177,9 @@ npm run dev
 | `PLEX_SERVER_ID`  | Your Plex server Machine Identifier (see below for how to find it)                                                                     | Yes      |
 | `PLEX_SERVER_IP`  | IP address of your Plex server for webhook security                                                                                    | No       |
 | `SESSION_SECRET`  | Secret key for session encryption                                                                                                      | Yes      |
-| `PLEX_SERVER_URL` | Base URL of your Plex server (e.g., http://192.168.1.100:32400). Enables seek correction by polling `/status/sessions` during playback | No       |
+| `PLEX_SERVER_URL` | Base URL of your Plex server (e.g., http://192.168.1.100:32400). Enables seek correction and full library sync | No       |
 | `PLEX_TOKEN`      | Plex token for the seek-correction poll (the server owner's token sees all sessions). Falls back to the watching user's own token      | No       |
+| `SYNC_INTERVAL`   | Bidirectional library sync schedule: `3h`, `6h`, `12h`, `24h`, or `off` (default: disabled)                                           | No       |
 | `TRAKT_API_URL`   | Override the Trakt API base URL — only used for local testing against the mock server                                                  | No       |
 
 ### Finding Your Plex Server ID
@@ -200,7 +205,8 @@ To find your Plex server machine identifier:
    - Stop sends `scrobble/stop` — at 80%+ progress Trakt records a watched play, below that it saves resumable progress
    - Plex's 90% "scrobble" event is deferred to the real stop so the watching status isn't cleared early; a fallback timer records the watch even if the stop webhook never arrives
 4. **Seek correction** (optional): Plex webhooks don't fire on seeks. With `PLEX_SERVER_URL` set, the app polls `/status/sessions` every 15s during active playback and re-syncs Trakt when the playback position drifts (e.g., you skipped ahead) or the session disappears
-5. **Token Management**:
+5. **Full library sync** (optional): With `SYNC_INTERVAL` and `PLEX_SERVER_URL` set, a scheduled job compares watch history between Plex and Trakt for all users and syncs the differences in both directions. An initial sync also runs on startup
+6. **Token Management**:
    - Access tokens are refreshed automatically when expired (24h)
    - Refresh tokens are kept alive with weekly maintenance (90d expiration)
 

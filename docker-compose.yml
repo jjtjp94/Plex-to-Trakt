@@ -19,6 +19,8 @@ services:
       - PLEX_SERVER_IP=${PLEX_SERVER_IP}
       # Session Secret
       - SESSION_SECRET=${SESSION_SECRET}
-      # Live scrobbling: optional seek correction (see README)
+      # Plex server connection: seek correction + full library sync (see README)
       - PLEX_SERVER_URL=${PLEX_SERVER_URL:-}
       - PLEX_TOKEN=${PLEX_TOKEN:-}
+      # Full library sync interval: 3h, 6h, 12h, 24h, or off
+      - SYNC_INTERVAL=${SYNC_INTERVAL:-}

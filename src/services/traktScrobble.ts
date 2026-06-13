@@ -77,6 +77,12 @@ export async function sendScrobble(
       console.log("ℹ️ Trakt already scrobbled this item (409), treating as success")
       return true
     }
+    // 422 = Trakt rejected the scrobble (progress went backward after a
+    // seek, or the item was already counted as watched). Non-fatal.
+    if (err.response?.status === 422) {
+      console.warn(`⚠️ Trakt rejected scrobble/${action} (422) — likely progress went backward or item already watched`)
+      return false
+    }
     // 429 = rate limited; corrections are best-effort, so just log it
     if (err.response?.status === 429) {
       console.warn("⚠️ Trakt rate limit hit (429), Retry-After:", err.response.headers["retry-after"])
