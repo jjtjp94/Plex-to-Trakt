@@ -1,9 +1,10 @@
 import axios from "axios"
 import { prisma } from "./prisma.js"
 import { refreshTraktToken } from "./tokenRefresh.js"
-import { getLibrarySections, getLibraryItems, extractAllIds } from "./plexApi.js"
+import { getLibrarySections, getLibraryItems, extractAllIds, type PlexItem } from "./plexApi.js"
 
 const TRAKT_API = process.env.TRAKT_API_URL || "https://api.trakt.tv"
+const POLL_PAGE_SIZE = 200
 
 interface CachedState {
   viewCount: number
@@ -11,6 +12,7 @@ interface CachedState {
 }
 
 const stateCache = new Map<string, Map<string, CachedState>>()
+let cachedSections: { key: string; type: string }[] | null = null
 
 function cacheKey(userId: number) {
   return `user:${userId}`
@@ -33,6 +35,30 @@ function idKeys(ids: Record<string, any>): string[] {
   return keys
 }
 
+async function getRecentItems(serverUrl: string, token: string, sectionKey: string, type: "movie" | "episode"): Promise<PlexItem[]> {
+  const base = serverUrl.replace(/\/$/, "")
+  const typeNum = type === "episode" ? "4" : "1"
+  const url = `${base}/library/sections/${sectionKey}/all?type=${typeNum}&sort=updatedAt:desc&includeGuids=1&X-Plex-Container-Start=0&X-Plex-Container-Size=${POLL_PAGE_SIZE}`
+  const res = await axios.get(url, {
+    headers: { "X-Plex-Token": token, Accept: "application/json" },
+    timeout: 15_000,
+  })
+  const items = res.data?.MediaContainer?.Metadata || []
+  return items.map((m: any) => ({
+    ratingKey: String(m.ratingKey),
+    title: m.title,
+    type,
+    viewCount: Number(m.viewCount) || 0,
+    viewOffset: Number(m.viewOffset) || 0,
+    duration: Number(m.duration) || 0,
+    ids: extractAllIds(m.guid, m.Guid),
+    parentIndex: m.parentIndex != null ? Number(m.parentIndex) : undefined,
+    index: m.index != null ? Number(m.index) : undefined,
+    grandparentRatingKey: m.grandparentRatingKey ? String(m.grandparentRatingKey) : undefined,
+    grandparentTitle: m.grandparentTitle,
+  }))
+}
+
 async function removeFromTraktPlayback(user: any, ids: Record<string, any>, title: string) {
   const hdrs = traktHeaders(user)
   const keys = new Set(idKeys(ids))
@@ -53,28 +79,37 @@ async function removeFromTraktPlayback(user: any, ids: Record<string, any>, titl
   }
 }
 
-async function pollUser(user: any, serverUrl: string) {
+async function pollUser(user: any, serverUrl: string, isFirstPoll: boolean) {
   const token = user.plexAuthToken
   if (!token) {
     console.log(`[watch-poll] User ${user.plexUsername || user.id} has no Plex token, skipping`)
     return
   }
 
-  let sections
-  try {
-    sections = await getLibrarySections(serverUrl, token)
-  } catch (err: any) {
-    console.warn(`[watch-poll] Plex unreachable: ${err.response?.status || err.message}`)
-    return
+  if (!cachedSections) {
+    try {
+      cachedSections = await getLibrarySections(serverUrl, token)
+    } catch (err: any) {
+      console.warn(`[watch-poll] Plex unreachable: ${err.response?.status || err.message}`)
+      return
+    }
   }
 
-  const items = []
-  for (const section of sections) {
+  const items: PlexItem[] = []
+  for (const section of cachedSections) {
     try {
       if (section.type === "movie") {
-        items.push(...await getLibraryItems(serverUrl, token, section.key, "movie"))
+        if (isFirstPoll) {
+          items.push(...await getLibraryItems(serverUrl, token, section.key, "movie"))
+        } else {
+          items.push(...await getRecentItems(serverUrl, token, section.key, "movie"))
+        }
       } else if (section.type === "show") {
-        items.push(...await getLibraryItems(serverUrl, token, section.key, "episode"))
+        if (isFirstPoll) {
+          items.push(...await getLibraryItems(serverUrl, token, section.key, "episode"))
+        } else {
+          items.push(...await getRecentItems(serverUrl, token, section.key, "episode"))
+        }
       }
     } catch {
       // skip this section
@@ -165,6 +200,7 @@ export function startWatchStatePoller() {
   const intervalMs = Math.max(30_000, interval * 1000)
   console.log(`✓ Watch-state poller running every ${interval}s`)
 
+  let firstPoll = true
   pollTimer = setInterval(async () => {
     try {
       const users = await prisma.user.findMany({
@@ -175,8 +211,9 @@ export function startWatchStatePoller() {
         return
       }
       for (const user of users) {
-        await pollUser(user, serverUrl)
+        await pollUser(user, serverUrl, firstPoll)
       }
+      firstPoll = false
     } catch (err: any) {
       console.error("[watch-poll] Error:", err.message)
     }
