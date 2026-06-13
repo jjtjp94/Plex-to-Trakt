@@ -4,6 +4,7 @@ import { refreshTraktToken } from "./tokenRefresh.js"
 import { getLibrarySections, getLibraryItems, extractAllIds, type PlexItem } from "./plexApi.js"
 
 const TRAKT_API = process.env.TRAKT_API_URL || "https://api.trakt.tv"
+const POLL_INTERVAL_MS = 5 * 60 * 1000 // 5 minutes
 
 interface CachedState {
   viewCount: number
@@ -14,6 +15,7 @@ interface CachedState {
 }
 
 const stateCache = new Map<string, Map<string, CachedState>>()
+let cachedSections: { key: string; type: string }[] | null = null
 
 function cacheKey(userId: number) {
   return `user:${userId}`
@@ -56,120 +58,70 @@ async function removeFromTraktPlayback(user: any, ids: Record<string, any>, titl
   }
 }
 
-async function fetchItemMetadata(serverUrl: string, token: string, ratingKey: string): Promise<PlexItem | null> {
+async function syncItemChange(user: any, item: PlexItem, prev: CachedState) {
+  const watchChanged = item.viewCount !== prev.viewCount
+  const progressCleared = prev.viewOffset > 0 && item.viewOffset === 0 && item.viewCount === 0
+
+  if (!watchChanged && !progressCleared) return
+
+  const ids = item.ids
+  if (Object.keys(ids).length === 0) return
+
+  const mdType = item.type === "movie" ? "movie" : item.type === "episode" ? "episode" : null
+  if (!mdType) return
+
+  const syncUnwatched = process.env.SYNC_UNWATCHED === "true"
+
   try {
-    const url = `${serverUrl.replace(/\/$/, "")}/library/metadata/${ratingKey}?includeGuids=1`
-    const res = await axios.get(url, {
-      headers: { "X-Plex-Token": token, Accept: "application/json" },
-      timeout: 10_000,
-    })
-    const m = res.data?.MediaContainer?.Metadata?.[0]
-    if (!m) return null
-    const type = m.type === "movie" ? "movie" : m.type === "episode" ? "episode" : m.type
-    return {
-      ratingKey: String(m.ratingKey),
-      title: m.title,
-      type,
-      viewCount: Number(m.viewCount) || 0,
-      viewOffset: Number(m.viewOffset) || 0,
-      duration: Number(m.duration) || 0,
-      ids: extractAllIds(m.guid, m.Guid),
-      parentIndex: m.parentIndex != null ? Number(m.parentIndex) : undefined,
-      index: m.index != null ? Number(m.index) : undefined,
-      grandparentRatingKey: m.grandparentRatingKey ? String(m.grandparentRatingKey) : undefined,
-      grandparentTitle: m.grandparentTitle,
+    user = await refreshTraktToken(user)
+
+    if (watchChanged && item.viewCount > prev.viewCount) {
+      console.log(`[watch-poll] Change: "${item.title}" viewCount ${prev.viewCount} -> ${item.viewCount}`)
+      const body = mdType === "movie"
+        ? { movies: [{ ids, title: item.title }] }
+        : { episodes: [{ ids, title: item.title }] }
+      await axios.post(`${TRAKT_API}/sync/history`, body, {
+        headers: traktHeaders(user),
+        timeout: 10_000,
+      })
+      console.log(`[watch-poll] "${item.title}" marked watched -> synced to Trakt`)
+    } else if (watchChanged && item.viewCount < prev.viewCount && syncUnwatched) {
+      console.log(`[watch-poll] Change: "${item.title}" viewCount ${prev.viewCount} -> ${item.viewCount}`)
+      const body = mdType === "movie"
+        ? { movies: [{ ids }] }
+        : { episodes: [{ ids }] }
+      await axios.post(`${TRAKT_API}/sync/history/remove`, body, {
+        headers: traktHeaders(user),
+        timeout: 10_000,
+      })
+      console.log(`[watch-poll] "${item.title}" marked unwatched -> removed from Trakt history`)
     }
-  } catch {
-    return null
+
+    if (progressCleared) {
+      console.log(`[watch-poll] Change: "${item.title}" viewOffset ${prev.viewOffset} -> 0 (progress cleared)`)
+      await removeFromTraktPlayback(user, ids, item.title)
+    }
+  } catch (err: any) {
+    console.warn(`[watch-poll] Failed to sync "${item.title}": ${err.message}`)
   }
 }
 
-async function handleItemChange(ratingKey: string, serverUrl: string) {
+async function pollAllItems(serverUrl: string) {
   const users = await prisma.user.findMany({
     where: { traktAccessToken: { not: null }, plexAuthToken: { not: null } },
   })
+  if (users.length === 0) return
 
   for (let user of users) {
-    const userKey = cacheKey(user.id)
-    const cache = stateCache.get(userKey)
-    if (!cache) { console.log(`[watch-poll] No cache for user ${user.plexUsername}`); continue }
-
-    const prev = cache.get(ratingKey)
-    if (!prev) { console.log(`[watch-poll] Item ${ratingKey} not in cache (${cache.size} cached items)`); continue }
-
-    const item = await fetchItemMetadata(serverUrl, user.plexAuthToken!, ratingKey)
-    if (!item) { console.log(`[watch-poll] Failed to fetch metadata for ${ratingKey}`); continue }
-
-    console.log(`[watch-poll] Item "${item.title}" (${ratingKey}): viewCount ${prev.viewCount}->${item.viewCount}, viewOffset ${prev.viewOffset}->${item.viewOffset}`)
-
-    cache.set(ratingKey, {
-      viewCount: item.viewCount,
-      viewOffset: item.viewOffset,
-      ids: item.ids,
-      type: item.type,
-      title: item.title,
-    })
-
-    const watchChanged = item.viewCount !== prev.viewCount
-    const progressCleared = prev.viewOffset > 0 && item.viewOffset === 0 && item.viewCount === 0
-
-    if (!watchChanged && !progressCleared) { console.log(`[watch-poll] No actionable change for "${item.title}"`); continue }
-
-    const ids = item.ids
-    if (Object.keys(ids).length === 0) continue
-
-    const mdType = item.type === "movie" ? "movie" : item.type === "episode" ? "episode" : null
-    if (!mdType) continue
-
-    const syncUnwatched = process.env.SYNC_UNWATCHED === "true"
-
-    try {
-      user = await refreshTraktToken(user)
-
-      if (watchChanged && item.viewCount > prev.viewCount) {
-        console.log(`[watch-poll] Change: "${item.title}" viewCount ${prev.viewCount} -> ${item.viewCount}`)
-        const body = mdType === "movie"
-          ? { movies: [{ ids, title: item.title }] }
-          : { episodes: [{ ids, title: item.title }] }
-        await axios.post(`${TRAKT_API}/sync/history`, body, {
-          headers: traktHeaders(user),
-          timeout: 10_000,
-        })
-        console.log(`[watch-poll] "${item.title}" marked watched -> synced to Trakt`)
-      } else if (watchChanged && item.viewCount < prev.viewCount && syncUnwatched) {
-        console.log(`[watch-poll] Change: "${item.title}" viewCount ${prev.viewCount} -> ${item.viewCount}`)
-        const body = mdType === "movie"
-          ? { movies: [{ ids }] }
-          : { episodes: [{ ids }] }
-        await axios.post(`${TRAKT_API}/sync/history/remove`, body, {
-          headers: traktHeaders(user),
-          timeout: 10_000,
-        })
-        console.log(`[watch-poll] "${item.title}" marked unwatched -> removed from Trakt history`)
-      }
-
-      if (progressCleared) {
-        console.log(`[watch-poll] Change: "${item.title}" viewOffset ${prev.viewOffset} -> 0 (progress cleared)`)
-        await removeFromTraktPlayback(user, ids, item.title)
-      }
-    } catch (err: any) {
-      console.warn(`[watch-poll] Failed to sync "${item.title}": ${err.message}`)
-    }
-  }
-}
-
-async function seedCache(serverUrl: string) {
-  const users = await prisma.user.findMany({
-    where: { traktAccessToken: { not: null }, plexAuthToken: { not: null } },
-  })
-
-  for (const user of users) {
     const token = user.plexAuthToken
     if (!token) continue
 
-    const sections = await getLibrarySections(serverUrl, token)
+    if (!cachedSections) {
+      cachedSections = await getLibrarySections(serverUrl, token)
+    }
+
     const items: PlexItem[] = []
-    for (const section of sections) {
+    for (const section of cachedSections) {
       if (section.type === "movie") {
         items.push(...await getLibraryItems(serverUrl, token, section.key, "movie"))
       } else if (section.type === "show") {
@@ -177,8 +129,29 @@ async function seedCache(serverUrl: string) {
       }
     }
 
-    const cache = new Map<string, CachedState>()
+    const userKey = cacheKey(user.id)
+    const cache = stateCache.get(userKey)
+
+    if (!cache) {
+      // First run: seed cache
+      const newCache = new Map<string, CachedState>()
+      for (const item of items) {
+        newCache.set(item.ratingKey, {
+          viewCount: item.viewCount,
+          viewOffset: item.viewOffset,
+          ids: item.ids,
+          type: item.type,
+          title: item.title,
+        })
+      }
+      stateCache.set(userKey, newCache)
+      console.log(`[watch-poll] Seeded cache with ${items.length} items for ${user.plexUsername || user.plexId}`)
+      continue
+    }
+
+    let changes = 0
     for (const item of items) {
+      const prev = cache.get(item.ratingKey)
       cache.set(item.ratingKey, {
         viewCount: item.viewCount,
         viewOffset: item.viewOffset,
@@ -186,94 +159,36 @@ async function seedCache(serverUrl: string) {
         type: item.type,
         title: item.title,
       })
+
+      if (!prev) continue
+      if (item.viewCount === prev.viewCount && (item.viewOffset === prev.viewOffset || !(prev.viewOffset > 0 && item.viewOffset === 0 && item.viewCount === 0))) continue
+
+      changes++
+      await syncItemChange(user, item, prev)
     }
-    stateCache.set(cacheKey(user.id), cache)
-    console.log(`[watch-poll] Seeded cache with ${items.length} items for ${user.plexUsername || user.plexId}`)
+
+    if (changes === 0) console.log(`[watch-poll] Polled ${items.length} items, no changes`)
   }
-}
-
-// Debounce: Plex sends multiple notifications per action
-const pendingItems = new Map<string, NodeJS.Timeout>()
-const DEBOUNCE_MS = 2000
-
-function debounceItemChange(ratingKey: string, serverUrl: string) {
-  if (pendingItems.has(ratingKey)) {
-    clearTimeout(pendingItems.get(ratingKey)!)
-  }
-  pendingItems.set(ratingKey, setTimeout(() => {
-    pendingItems.delete(ratingKey)
-    handleItemChange(ratingKey, serverUrl).catch((err) => {
-      console.warn(`[watch-poll] Error handling change for ${ratingKey}: ${err.message}`)
-    })
-  }, DEBOUNCE_MS))
-}
-
-function connectWebSocket(serverUrl: string, token: string) {
-  const wsUrl = `${serverUrl.replace(/^http/, "ws").replace(/\/$/, "")}/:/websockets/notifications?X-Plex-Token=${token}`
-
-  const ws = new WebSocket(wsUrl)
-
-  ws.addEventListener("open", () => {
-    console.log("✓ Watch-state listener connected to Plex via WebSocket")
-  })
-
-  ws.addEventListener("message", (event) => {
-    try {
-      const data = JSON.parse(String(event.data))
-      const container = data.NotificationContainer
-      if (!container) return
-
-      // Log all event types so we can see what Plex actually sends
-      console.log(`[watch-poll] WS event: type="${container.type}" size=${container.size || 0}`)
-      if (container.type === "timeline") {
-        const entries = container.TimelineEntry || []
-        for (const entry of entries) {
-          console.log(`[watch-poll]   timeline: itemID=${entry.itemID} type=${entry.type} state=${entry.state} identifier=${entry.identifier}`)
-          if (entry.identifier !== "com.plexapp.plugins.library") continue
-          if (!entry.itemID) continue
-          debounceItemChange(String(entry.itemID), serverUrl)
-        }
-      } else if (container.type === "activity") {
-        const activities = container.ActivityNotification || []
-        for (const a of activities) {
-          console.log(`[watch-poll]   activity: event="${a.event}" type=${a.Activity?.type} title="${a.Activity?.title}"`)
-        }
-      } else if (container.type === "playing") {
-        const sessions = container.PlaySessionStateNotification || []
-        for (const s of sessions) {
-          console.log(`[watch-poll]   playing: ratingKey=${s.ratingKey} state="${s.state}" viewOffset=${s.viewOffset}`)
-        }
-      }
-    } catch {
-      // ignore malformed messages
-    }
-  })
-
-  ws.addEventListener("close", () => {
-    console.log("[watch-poll] WebSocket closed, reconnecting in 10s...")
-    setTimeout(() => connectWebSocket(serverUrl, token), 10_000)
-  })
-
-  ws.addEventListener("error", () => {
-    // close event will fire after this and handle reconnection
-  })
 }
 
 export async function startWatchStatePoller() {
   const serverUrl = process.env.PLEX_SERVER_URL
   if (!serverUrl) return
 
-  const token = process.env.PLEX_TOKEN
-  if (!token) {
-    console.log("ℹ️  Watch-state listener disabled (PLEX_TOKEN not set)")
-    return
-  }
+  console.log(`✓ Watch-state poller running every 5m`)
 
+  // Seed cache immediately
   try {
-    await seedCache(serverUrl)
+    await pollAllItems(serverUrl)
   } catch (err: any) {
-    console.warn(`[watch-poll] Failed to seed cache: ${err.message}`)
+    console.warn(`[watch-poll] Initial poll failed: ${err.message}`)
   }
 
-  connectWebSocket(serverUrl, token)
+  setInterval(async () => {
+    try {
+      await pollAllItems(serverUrl)
+    } catch (err: any) {
+      console.error(`[watch-poll] Error: ${err.message}`)
+    }
+  }, POLL_INTERVAL_MS)
 }
