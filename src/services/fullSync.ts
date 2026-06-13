@@ -150,8 +150,10 @@ async function syncEpisodes(user: any, plexShows: PlexItem[], plexEpisodes: Plex
 
   // Map: Plex show ratingKey -> show external IDs
   const showIdsByRK = new Map<string, Record<string, any>>()
+  const plexShowByTitle = new Map<string, PlexItem>()
   let showsWithoutIds = 0
   for (const show of plexShows) {
+    plexShowByTitle.set(show.title.toLowerCase(), show)
     if (Object.keys(show.ids).length > 0) {
       showIdsByRK.set(show.ratingKey, show.ids)
     } else {
@@ -218,16 +220,24 @@ async function syncEpisodes(user: any, plexShows: PlexItem[], plexEpisodes: Plex
 
   // Trakt -> Plex
   let toPlex = 0
-  let epsNotInPlex = 0
+  const missedByShow = new Map<string, { count: number; traktIds: any; plexIds?: any }>()
   for (const tw of traktWatched) {
     const showIds = tw.show?.ids || {}
+    const showTitle = tw.show?.title || "?"
     for (const season of tw.seasons || []) {
       for (const ep of season.episodes || []) {
         const keys = episodeKeys(showIds, season.number, ep.number)
         const plexEp = keys.map((k) => plexEpByComposite.get(k)).find(Boolean)
         if (!plexEp) {
-          epsNotInPlex++
-          console.log(`[sync]   ⚠ Trakt watched "${tw.show?.title}" S${season.number}E${ep.number} not in Plex library`)
+          if (!missedByShow.has(showTitle)) {
+            const plexMatch = plexShowByTitle.get(showTitle.toLowerCase())
+            missedByShow.set(showTitle, {
+              count: 0,
+              traktIds: showIds,
+              plexIds: plexMatch ? plexMatch.ids : undefined,
+            })
+          }
+          missedByShow.get(showTitle)!.count++
           continue
         }
         if (plexEp.viewCount <= 0) {
@@ -243,7 +253,18 @@ async function syncEpisodes(user: any, plexShows: PlexItem[], plexEpisodes: Plex
     }
   }
   if (toPlex > 0) console.log(`[sync]   ${toPlex} episode(s) Trakt -> Plex`)
-  if (epsNotInPlex > 0) console.log(`[sync]   ${epsNotInPlex} Trakt episode(s) not in Plex library (skipped)`)
+  if (missedByShow.size > 0) {
+    let totalMissed = 0
+    for (const [title, info] of missedByShow) {
+      totalMissed += info.count
+      if (info.plexIds) {
+        console.log(`[sync]   ⚠ ID MISMATCH "${title}" (${info.count} eps) — Trakt IDs: ${JSON.stringify(info.traktIds)} vs Plex IDs: ${JSON.stringify(info.plexIds)}`)
+      } else {
+        console.log(`[sync]   ⚠ "${title}" (${info.count} eps) — not in Plex library`)
+      }
+    }
+    console.log(`[sync]   ${totalMissed} Trakt episode(s) across ${missedByShow.size} show(s) could not be matched`)
+  }
 
   // Unwatched sync for episodes (opt-in)
   if (SYNC_UNWATCHED) {
