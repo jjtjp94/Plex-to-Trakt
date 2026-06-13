@@ -1,7 +1,7 @@
 import axios from "axios"
 import { prisma } from "./prisma.js"
 import { refreshTraktToken } from "./tokenRefresh.js"
-import { getLibrarySections, getLibraryItems, markPlexWatched, markPlexUnwatched, type PlexItem } from "./plexApi.js"
+import { getLibrarySections, getLibraryItems, markPlexWatched, markPlexUnwatched, setPlexViewOffset, type PlexItem } from "./plexApi.js"
 
 const TRAKT_API = process.env.TRAKT_API_URL || "https://api.trakt.tv"
 const PLEX_MARK_DELAY_MS = 100
@@ -356,6 +356,98 @@ async function syncEpisodes(user: any, plexShows: PlexItem[], plexEpisodes: Plex
   return { toTrakt: toTrakt.length, toPlex }
 }
 
+async function syncPlayback(user: any, allPlexItems: PlexItem[], serverUrl: string) {
+  // Find in-progress items in Plex (has viewOffset but not fully watched)
+  const inProgress = allPlexItems.filter(
+    (m) => m.viewOffset > 0 && m.viewCount <= 0 && m.duration > 0 && Object.keys(m.ids).length > 0
+  )
+  if (inProgress.length === 0) return { toTrakt: 0, toPlex: 0 }
+
+  // Get Trakt's current playback state
+  const [moviePb, episodePb] = await Promise.all([
+    axios.get(`${TRAKT_API}/sync/playback/movies`, { headers: traktHeaders(user), timeout: 30_000 }).then((r) => r.data || []).catch(() => []),
+    axios.get(`${TRAKT_API}/sync/playback/episodes`, { headers: traktHeaders(user), timeout: 30_000 }).then((r) => r.data || []).catch(() => []),
+  ])
+
+  // Index Trakt playback by ID keys
+  const traktPbByKey = new Map<string, { progress: number; id: number }>()
+  for (const pb of moviePb) {
+    for (const k of idKeys(pb.movie?.ids || {})) traktPbByKey.set(k, { progress: pb.progress, id: pb.id })
+  }
+  for (const pb of episodePb) {
+    for (const k of idKeys(pb.episode?.ids || {})) traktPbByKey.set(k, { progress: pb.progress, id: pb.id })
+  }
+
+  // Plex -> Trakt: push in-progress items that aren't already on Trakt (or have drifted >5%)
+  let toTrakt = 0
+  for (const item of inProgress) {
+    const progress = Math.min(100, Math.max(0, (item.viewOffset / item.duration) * 100))
+    if (progress < 1) continue
+
+    const keys = idKeys(item.ids)
+    const existing = keys.map((k) => traktPbByKey.get(k)).find(Boolean)
+    if (existing && Math.abs(existing.progress - progress) < 5) continue
+
+    const mdType = item.type === "movie" ? "movie" : "episode"
+    const body = mdType === "movie"
+      ? { movie: { ids: item.ids }, progress }
+      : { episode: { ids: item.ids }, progress }
+
+    try {
+      await axios.post(`${TRAKT_API}/scrobble/pause`, body, {
+        headers: traktHeaders(user),
+        timeout: 10_000,
+      })
+      toTrakt++
+    } catch (err: any) {
+      if (err.response?.status !== 409 && err.response?.status !== 422) {
+        console.warn(`[sync]   Failed to sync playback for "${item.title}": ${err.message}`)
+      }
+    }
+  }
+
+  // Trakt -> Plex: pull Trakt playback items and set resume position in Plex
+  // Build a lookup of all Plex items by ID key for matching
+  const plexByIdKey = new Map<string, PlexItem>()
+  for (const item of allPlexItems) {
+    for (const k of idKeys(item.ids)) plexByIdKey.set(k, item)
+  }
+
+  let toPlex = 0
+  const allTraktPb = [...moviePb, ...episodePb]
+  for (const pb of allTraktPb) {
+    const itemIds = pb.movie?.ids || pb.episode?.ids || {}
+    const keys = idKeys(itemIds)
+    const plexItem = keys.map((k) => plexByIdKey.get(k)).find(Boolean)
+    if (!plexItem) continue
+    if (plexItem.viewCount > 0) continue // already fully watched
+    if (plexItem.duration <= 0) continue
+
+    const traktOffsetMs = (pb.progress / 100) * plexItem.duration
+    const drift = Math.abs(traktOffsetMs - plexItem.viewOffset)
+    if (drift < 30_000) continue // less than 30s difference, skip
+
+    // Only update if Trakt is further ahead (don't rewind)
+    if (traktOffsetMs <= plexItem.viewOffset) continue
+
+    try {
+      await setPlexViewOffset(serverUrl, user.plexAuthToken, plexItem.ratingKey, Math.round(traktOffsetMs))
+      toPlex++
+      await new Promise((r) => setTimeout(r, PLEX_MARK_DELAY_MS))
+    } catch (err: any) {
+      console.warn(`[sync]   Failed to set playback for "${plexItem.title}" in Plex: ${err.message}`)
+    }
+  }
+
+  if (toTrakt > 0 || toPlex > 0) {
+    console.log(`[sync]   Playback: ${toTrakt} resume points -> Trakt, ${toPlex} -> Plex`)
+  } else {
+    console.log(`[sync]   Playback: ${inProgress.length} in-progress items, all in sync`)
+  }
+
+  return { toTrakt, toPlex }
+}
+
 export async function runFullSync(): Promise<void> {
   const serverUrl = process.env.PLEX_SERVER_URL
   if (!serverUrl) {
@@ -383,10 +475,12 @@ export async function runFullSync(): Promise<void> {
       const sections = await getLibrarySections(serverUrl, user.plexAuthToken!)
       let totalToTrakt = 0
       let totalToPlex = 0
+      const allItems: PlexItem[] = []
 
       for (const section of sections.filter((s) => s.type === "movie")) {
         console.log(`[sync]   Library: ${section.title} (movies)`)
         const movies = await getLibraryItems(serverUrl, user.plexAuthToken!, section.key, "movie")
+        allItems.push(...movies)
         const r = await syncMovies(user, movies, serverUrl)
         totalToTrakt += r.toTrakt
         totalToPlex += r.toPlex
@@ -396,10 +490,16 @@ export async function runFullSync(): Promise<void> {
         console.log(`[sync]   Library: ${section.title} (shows)`)
         const shows = await getLibraryItems(serverUrl, user.plexAuthToken!, section.key, "show")
         const episodes = await getLibraryItems(serverUrl, user.plexAuthToken!, section.key, "episode")
+        allItems.push(...episodes)
         const r = await syncEpisodes(user, shows, episodes, serverUrl)
         totalToTrakt += r.toTrakt
         totalToPlex += r.toPlex
       }
+
+      // Sync "continue watching" / in-progress playback positions
+      const pb = await syncPlayback(user, allItems, serverUrl)
+      totalToTrakt += pb.toTrakt
+      totalToPlex += pb.toPlex
 
       if (totalToTrakt === 0 && totalToPlex === 0) {
         console.log(`[sync] ${user.plexUsername}: already in sync`)

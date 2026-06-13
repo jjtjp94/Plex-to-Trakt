@@ -11,6 +11,8 @@ export interface PlexItem {
   title: string
   type: string
   viewCount: number
+  viewOffset: number
+  duration: number
   ids: Record<string, string | number>
   parentIndex?: number
   index?: number
@@ -78,6 +80,8 @@ export async function getLibraryItems(
     title: m.title,
     type,
     viewCount: Number(m.viewCount) || 0,
+    viewOffset: Number(m.viewOffset) || 0,
+    duration: Number(m.duration) || 0,
     ids: extractAllIds(m.guid, m.Guid),
     parentIndex: m.parentIndex != null ? Number(m.parentIndex) : undefined,
     index: m.index != null ? Number(m.index) : undefined,
@@ -95,6 +99,20 @@ export async function markPlexWatched(serverUrl: string, token: string, ratingKe
 
 export async function markPlexUnwatched(serverUrl: string, token: string, ratingKey: string): Promise<void> {
   await axios.get(`${baseUrl(serverUrl)}/:/unscrobble?identifier=com.plexapp.plugins.library&key=${ratingKey}`, {
+    headers: plexHeaders(token),
+    timeout: 10_000,
+  })
+}
+
+export async function setPlexViewOffset(serverUrl: string, token: string, ratingKey: string, offsetMs: number): Promise<void> {
+  const params = new URLSearchParams({
+    ratingKey,
+    key: `/library/metadata/${ratingKey}`,
+    identifier: "com.plexapp.plugins.library",
+    time: String(offsetMs),
+    state: "stopped",
+  })
+  await axios.get(`${baseUrl(serverUrl)}/:/timeline?${params.toString()}`, {
     headers: plexHeaders(token),
     timeout: 10_000,
   })
