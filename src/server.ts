@@ -43,9 +43,12 @@ if (!existsSync(generatedPath)) {
 const { default: webhookRouter } = await import("./routes/webhook.js")
 const { default: authPlexRouter } = await import("./routes/authPlex.js")
 const { default: authTraktRouter } = await import("./routes/authTrakt.js")
+const { default: eventsRouter } = await import("./routes/events.js")
+const { default: statusRouter } = await import("./routes/status.js")
 const { startTokenRefreshCron } = await import("./services/tokenRefreshCron.js")
 const { startSyncScheduler } = await import("./services/syncScheduler.js")
 const { startWatchStatePoller } = await import("./services/watchStatePoller.js")
+const { startPlexWebSocket } = await import("./services/plexWebSocket.js")
 const { runFullSync } = await import("./services/fullSync.js")
 
 const app = express()
@@ -73,6 +76,8 @@ app.use(express.json())
 app.use("/webhooks", webhookRouter)
 app.use("/auth/plex", authPlexRouter)
 app.use("/auth/trakt", authTraktRouter)
+app.use("/api/events", eventsRouter)
+app.use("/api", statusRouter)
 
 // API endpoint for frontend configuration
 app.get("/api/config", (req, res) => {
@@ -110,4 +115,5 @@ app.listen(PORT, async () => {
   startTokenRefreshCron()
   startSyncScheduler()
   await startWatchStatePoller()
+  await startPlexWebSocket()
 })

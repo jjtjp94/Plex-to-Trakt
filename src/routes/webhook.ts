@@ -13,6 +13,7 @@ import {
   markFinalized,
   extrapolatedProgress,
 } from "../services/sessionTracker.js"
+import { emit } from "../services/eventBus.js"
 
 const PLAYBACK_EVENTS = ["media.play", "media.resume", "media.pause", "media.stop", "media.scrobble"]
 const SUPPORTED_TYPES = ["movie", "episode"]
@@ -124,6 +125,11 @@ router.post("/plex", upload.single("thumb"), async (req, res) => {
           progress,
         })
         markPosted(session)
+        emit({
+          type: "scrobble",
+          data: { action: "start", title: md.title, progress, user: user.plexUsername, player: payload.Player?.title, mediaType: md.type },
+          timestamp: Date.now(),
+        })
         console.log(`▶️ Trakt watching now at ${progress.toFixed(1)}%`)
         return res.status(200).send("ok")
       }
@@ -143,6 +149,11 @@ router.post("/plex", upload.single("thumb"), async (req, res) => {
           progress,
         })
         markPosted(session)
+        emit({
+          type: "scrobble",
+          data: { action: "pause", title: md.title, progress, user: user.plexUsername, player: payload.Player?.title, mediaType: md.type },
+          timestamp: Date.now(),
+        })
         console.log(`⏸ Trakt paused at ${progress.toFixed(1)}%`)
         return res.status(200).send("ok")
       }
@@ -171,8 +182,6 @@ router.post("/plex", upload.single("thumb"), async (req, res) => {
         const watched = tracked?.plexScrobbled || progress >= 90
         const finalProgress = watched ? Math.max(progress, 90) : progress
         try {
-          // >= 80% records a watched play; below that Trakt saves it as
-          // resumable playback progress
           await sendScrobble("stop", user, md.type, ids, finalProgress)
         } catch (err: any) {
           if (!watched) throw err
@@ -180,6 +189,13 @@ router.post("/plex", upload.single("thumb"), async (req, res) => {
           await syncToTrakt(user, md, ids)
         }
         markFinalized(key)
+        emit({
+          type: watched ? "watched" : "scrobble",
+          data: watched
+            ? { title: md.title, mediaType: md.type, user: user.plexUsername }
+            : { action: "stop", title: md.title, progress: finalProgress, user: user.plexUsername, player: payload.Player?.title, mediaType: md.type },
+          timestamp: Date.now(),
+        })
         console.log(`⏹ Stopped at ${finalProgress.toFixed(1)}%${watched ? " (recorded as watched)" : ""}`)
         return res.status(200).send("ok")
       }

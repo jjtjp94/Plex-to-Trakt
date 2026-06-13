@@ -1,362 +1,1191 @@
 <!DOCTYPE html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <title>Plex → Trakt Sync</title>
-    <style>
-      body {
-        font-family: Arial, sans-serif;
-        max-width: 800px;
-        margin: 50px auto;
-        padding: 20px;
-        background: #1a1a1a;
-        color: #fff;
-      }
-      h1 {
-        color: #e5a00d;
-      }
-      .section {
-        background: #2a2a2a;
-        padding: 20px;
-        margin: 20px 0;
-        border-radius: 8px;
-      }
-      button,
-      .btn {
-        background: #e5a00d;
-        color: #000;
-        padding: 10px 20px;
-        border: none;
-        border-radius: 4px;
-        cursor: pointer;
-        font-size: 14px;
-        text-decoration: none;
-        display: inline-block;
-      }
-      button:hover,
-      .btn:hover {
-        background: #cc8d00;
-      }
-      input {
-        width: 100%;
-        padding: 8px;
-        margin: 5px 0 15px 0;
-        border: 1px solid #444;
-        border-radius: 4px;
-        background: #333;
-        color: #fff;
-      }
-      label {
-        font-weight: bold;
-        color: #aaa;
-      }
-      .status {
-        color: #4caf50;
-      }
-      .error {
-        color: #f44336;
-      }
-    </style>
-  </head>
-  <body>
-    <h1><img src="/favicon.svg" alt="" style="height:1em;vertical-align:-0.1em;margin-right:6px" />Plex → Trakt Sync</h1>
-    <p>Automatically sync your Plex watch history to Trakt using webhooks</p>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <title>PlexTrakt</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-    <div class="section" id="step1">
-      <h2>Step 1: Login with Plex</h2>
-      <p>First, authenticate with your Plex account to verify you have access to the server.</p>
-      <button onclick="loginPlex()">Login with Plex</button>
-      <div id="plexStatus"></div>
+    :root {
+      --accent:          oklch(0.72 0.16 70);
+      --accent-hover:    oklch(0.66 0.16 70);
+      --accent-subtle:   oklch(0.72 0.16 70 / 0.15);
+      --success:         oklch(0.72 0.14 145);
+      --warning:         oklch(0.78 0.15 85);
+      --error:           oklch(0.65 0.18 25);
+      --bg-root:         oklch(0.15 0.005 50);
+      --bg-surface:      oklch(0.20 0.005 50);
+      --bg-elevated:     oklch(0.25 0.005 50);
+      --border:          oklch(0.30 0.005 50);
+      --text-primary:    oklch(0.92 0.005 50);
+      --text-secondary:  oklch(0.65 0.005 50);
+      --text-tertiary:   oklch(0.45 0.005 50);
+      --radius: 8px;
+      --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    }
+
+    html { height: 100%; }
+
+    body {
+      font-family: var(--font);
+      background: var(--bg-root);
+      color: var(--text-primary);
+      font-size: 15px;
+      line-height: 1.5;
+      min-height: 100%;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .app {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 0 16px 48px;
+    }
+
+    /* --- Nav --- */
+    .nav {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: var(--bg-elevated);
+      border-bottom: 1px solid var(--border);
+      padding: 0 16px;
+      display: flex;
+      align-items: center;
+      height: 52px;
+      gap: 12px;
+    }
+
+    .nav-brand {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 600;
+      font-size: 15px;
+      color: var(--text-primary);
+      text-decoration: none;
+      margin-right: auto;
+    }
+
+    .nav-brand img {
+      width: 28px;
+      height: 28px;
+    }
+
+    .nav-dots {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .status-indicator {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      color: var(--text-secondary);
+      cursor: default;
+      position: relative;
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--text-tertiary);
+      flex-shrink: 0;
+      transition: background 0.3s, transform 0.3s;
+    }
+
+    .status-dot--green { background: var(--success); }
+    .status-dot--red { background: var(--error); }
+    .status-dot--yellow { background: var(--warning); }
+
+    .status-dot--pulse {
+      animation: dot-pulse 2s ease-in-out infinite;
+    }
+
+    @keyframes dot-pulse {
+      0%, 100% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.4); opacity: 0.7; }
+    }
+
+    .status-dot--reconnect {
+      animation: dot-reconnect 0.3s ease-out;
+    }
+
+    @keyframes dot-reconnect {
+      0% { transform: scale(1.6); }
+      100% { transform: scale(1); }
+    }
+
+    .nav-gear {
+      background: none;
+      border: none;
+      color: var(--text-secondary);
+      cursor: pointer;
+      padding: 8px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: color 0.15s, background 0.15s;
+      margin-left: 8px;
+    }
+
+    .nav-gear:hover { color: var(--text-primary); background: var(--bg-surface); }
+    .nav-gear:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+    .nav-gear svg { width: 20px; height: 20px; }
+
+    /* --- Feed --- */
+    .feed {
+      margin-top: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .feed-empty {
+      text-align: center;
+      padding: 64px 24px;
+      color: var(--text-tertiary);
+      font-size: 15px;
+    }
+
+    .activity-item {
+      background: var(--bg-surface);
+      padding: 14px 16px;
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+      content-visibility: auto;
+    }
+
+    .activity-item:first-child {
+      border-radius: var(--radius) var(--radius) 0 0;
+    }
+
+    .activity-item:last-child {
+      border-radius: 0 0 var(--radius) var(--radius);
+    }
+
+    .activity-item:only-child {
+      border-radius: var(--radius);
+    }
+
+    .activity-item--entering {
+      animation: slide-in 200ms ease-out;
+    }
+
+    @keyframes slide-in {
+      from { opacity: 0; transform: translateY(-8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .activity-icon {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      font-size: 16px;
+      margin-top: 2px;
+    }
+
+    .activity-icon--watching { background: var(--accent-subtle); }
+    .activity-icon--watched { background: oklch(0.72 0.14 145 / 0.15); }
+    .activity-icon--synced { background: oklch(0.65 0.005 50 / 0.15); }
+    .activity-icon--error { background: oklch(0.65 0.18 25 / 0.15); }
+    .activity-icon--ws { background: oklch(0.60 0.12 260 / 0.15); }
+
+    .activity-body {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .activity-header {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .activity-badge {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      padding: 1px 6px;
+      border-radius: 4px;
+    }
+
+    .badge--watching { color: var(--accent); background: var(--accent-subtle); }
+    .badge--watched { color: var(--success); background: oklch(0.72 0.14 145 / 0.15); }
+    .badge--synced { color: var(--text-secondary); background: oklch(0.65 0.005 50 / 0.15); }
+    .badge--error { color: var(--error); background: oklch(0.65 0.18 25 / 0.15); }
+    .badge--ws { color: oklch(0.70 0.12 260); background: oklch(0.60 0.12 260 / 0.15); }
+
+    .activity-time {
+      font-size: 13px;
+      color: var(--text-tertiary);
+      margin-left: auto;
+      white-space: nowrap;
+    }
+
+    .activity-title {
+      font-weight: 600;
+      margin-top: 2px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .activity-meta {
+      font-size: 13px;
+      color: var(--text-secondary);
+      margin-top: 2px;
+    }
+
+    .activity-progress {
+      height: 3px;
+      background: var(--border);
+      border-radius: 2px;
+      margin-top: 8px;
+      overflow: hidden;
+    }
+
+    .activity-progress-fill {
+      height: 100%;
+      background: var(--accent);
+      border-radius: 2px;
+      transition: width 1s linear;
+    }
+
+    .activity-check {
+      display: inline-block;
+      color: var(--success);
+      margin-left: 4px;
+      animation: check-pop 300ms ease-out;
+    }
+
+    @keyframes check-pop {
+      0% { transform: scale(0); opacity: 0; }
+      60% { transform: scale(1.2); }
+      100% { transform: scale(1); opacity: 1; }
+    }
+
+    /* --- Sync Panel --- */
+    .sync-panel {
+      margin-top: 24px;
+      background: var(--bg-surface);
+      border-radius: var(--radius);
+      padding: 16px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    .sync-info {
+      flex: 1;
+      min-width: 200px;
+    }
+
+    .sync-info-line {
+      font-size: 13px;
+      color: var(--text-secondary);
+    }
+
+    .sync-info-line strong {
+      color: var(--text-primary);
+      font-weight: 600;
+    }
+
+    /* --- Buttons --- */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 10px 20px;
+      border: none;
+      border-radius: 6px;
+      font-family: var(--font);
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s, opacity 0.15s;
+      min-height: 44px;
+      min-width: 44px;
+    }
+
+    .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+    .btn--primary {
+      background: var(--accent);
+      color: oklch(0.15 0.005 50);
+    }
+    .btn--primary:hover { background: var(--accent-hover); }
+    .btn--primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .btn--secondary {
+      background: var(--bg-elevated);
+      color: var(--text-primary);
+    }
+    .btn--secondary:hover { background: var(--border); }
+
+    .btn--danger {
+      background: var(--error);
+      color: white;
+    }
+    .btn--danger:hover { background: oklch(0.58 0.18 25); }
+
+    .btn--ghost {
+      background: transparent;
+      color: var(--text-secondary);
+      padding: 8px 12px;
+    }
+    .btn--ghost:hover { color: var(--text-primary); background: var(--bg-elevated); }
+
+    /* --- Settings Panel --- */
+    .settings-overlay {
+      position: fixed;
+      inset: 0;
+      background: oklch(0 0 0 / 0.5);
+      z-index: 200;
+      opacity: 0;
+      visibility: hidden;
+      transition: opacity 250ms ease-out, visibility 250ms;
+    }
+
+    .settings-overlay.open {
+      opacity: 1;
+      visibility: visible;
+    }
+
+    .settings-panel {
+      position: fixed;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      width: min(400px, 100vw);
+      background: var(--bg-surface);
+      z-index: 201;
+      transform: translateX(100%);
+      transition: transform 250ms ease-out;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .settings-panel.open {
+      transform: translateX(0);
+    }
+
+    .settings-header {
+      padding: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      background: var(--bg-surface);
+    }
+
+    .settings-header h2 {
+      font-size: 15px;
+      font-weight: 600;
+    }
+
+    .settings-close {
+      background: none;
+      border: none;
+      color: var(--text-secondary);
+      cursor: pointer;
+      padding: 8px;
+      border-radius: 6px;
+      display: flex;
+    }
+    .settings-close:hover { color: var(--text-primary); background: var(--bg-elevated); }
+
+    .settings-section {
+      padding: 16px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .settings-section h3 {
+      font-size: 13px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-secondary);
+      margin-bottom: 12px;
+    }
+
+    .settings-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 6px 0;
+      font-size: 14px;
+    }
+
+    .settings-row-label { color: var(--text-secondary); }
+    .settings-row-value { color: var(--text-primary); font-weight: 500; }
+    .settings-row-value--green { color: var(--success); }
+    .settings-row-value--red { color: var(--error); }
+    .settings-row-value--yellow { color: var(--warning); }
+
+    .settings-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    /* --- Setup Wizard --- */
+    .wizard {
+      max-width: 480px;
+      margin: 80px auto 0;
+      padding: 0 16px;
+    }
+
+    .wizard-step {
+      background: var(--bg-surface);
+      border-radius: var(--radius);
+      padding: 32px 24px;
+      margin-bottom: 16px;
+    }
+
+    .wizard-step h2 {
+      font-size: 20px;
+      margin-bottom: 8px;
+    }
+
+    .wizard-step p {
+      color: var(--text-secondary);
+      margin-bottom: 16px;
+      font-size: 14px;
+    }
+
+    .wizard-step a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+    .wizard-step a:hover { text-decoration: underline; }
+
+    .wizard-step code {
+      background: var(--bg-elevated);
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 13px;
+      color: var(--accent);
+      word-break: break-all;
+    }
+
+    .form-group {
+      margin-bottom: 16px;
+    }
+
+    .form-label {
+      display: block;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      margin-bottom: 4px;
+    }
+
+    .form-input {
+      width: 100%;
+      padding: 10px 12px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text-primary);
+      font-family: var(--font);
+      font-size: 14px;
+      transition: border-color 0.15s;
+    }
+
+    .form-input:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+
+    .form-status {
+      margin-top: 12px;
+      font-size: 14px;
+    }
+
+    .form-status--ok { color: var(--success); }
+    .form-status--error { color: var(--error); }
+    .form-status--pending { color: var(--text-secondary); }
+
+    .wizard-complete {
+      text-align: center;
+      padding: 40px 24px;
+    }
+
+    .wizard-complete h2 {
+      color: var(--success);
+      margin-bottom: 8px;
+    }
+
+    /* --- Responsive --- */
+    @media (max-width: 768px) {
+      .status-label { display: none; }
+      .sync-panel { flex-direction: column; align-items: stretch; }
+    }
+
+    /* --- Reduced Motion --- */
+    @media (prefers-reduced-motion: reduce) {
+      .activity-item--entering { animation: none; }
+      .status-dot--pulse { animation: none; }
+      .activity-check { animation: none; }
+      .settings-panel { transition: none; }
+      .settings-overlay { transition: none; }
+      .activity-progress-fill { transition: none; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Nav -->
+  <nav class="nav">
+    <a href="/" class="nav-brand">
+      <img src="/favicon.svg" alt="" />
+      PlexTrakt
+    </a>
+    <div class="nav-dots" id="navDots">
+      <div class="status-indicator" title="Plex">
+        <span class="status-dot" id="dotPlex"></span>
+        <span class="status-label">Plex</span>
+      </div>
+      <div class="status-indicator" title="Trakt">
+        <span class="status-dot" id="dotTrakt"></span>
+        <span class="status-label">Trakt</span>
+      </div>
+      <div class="status-indicator" title="WebSocket">
+        <span class="status-dot" id="dotWs"></span>
+        <span class="status-label">WS</span>
+      </div>
+    </div>
+    <button class="nav-gear" id="gearBtn" title="Settings" aria-label="Settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.32 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+      </svg>
+    </button>
+  </nav>
+
+  <!-- Settings Panel -->
+  <div class="settings-overlay" id="settingsOverlay"></div>
+  <div class="settings-panel" id="settingsPanel">
+    <div class="settings-header">
+      <h2>Settings</h2>
+      <button class="settings-close" id="settingsClose" aria-label="Close settings">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="settings-section">
+      <h3>Plex</h3>
+      <div class="settings-row">
+        <span class="settings-row-label">Status</span>
+        <span class="settings-row-value" id="settingsPlexStatus">--</span>
+      </div>
+      <div class="settings-row">
+        <span class="settings-row-label">User</span>
+        <span class="settings-row-value" id="settingsPlexUser">--</span>
+      </div>
+    </div>
+    <div class="settings-section">
+      <h3>Trakt</h3>
+      <div class="settings-row">
+        <span class="settings-row-label">Status</span>
+        <span class="settings-row-value" id="settingsTraktStatus">--</span>
+      </div>
+      <div class="settings-row">
+        <span class="settings-row-label">Token expires</span>
+        <span class="settings-row-value" id="settingsTraktExpiry">--</span>
+      </div>
+      <div class="settings-actions">
+        <button class="btn btn--secondary" onclick="showTraktSettings()">Change Credentials</button>
+        <button class="btn btn--danger" onclick="removeTraktCredentials()">Disconnect</button>
+      </div>
+    </div>
+    <div class="settings-section">
+      <h3>WebSocket</h3>
+      <div class="settings-row">
+        <span class="settings-row-label">Status</span>
+        <span class="settings-row-value" id="settingsWsStatus">--</span>
+      </div>
+      <div class="settings-row">
+        <span class="settings-row-label">Reconnects</span>
+        <span class="settings-row-value" id="settingsWsReconnects">--</span>
+      </div>
+    </div>
+    <div class="settings-section">
+      <h3>Webhook</h3>
+      <div class="settings-row" style="flex-direction:column;align-items:flex-start;gap:4px">
+        <span class="settings-row-label">Configure in Plex → Settings → Webhooks</span>
+        <code id="settingsWebhookUrl" style="background:var(--bg-elevated);padding:6px 10px;border-radius:4px;font-size:13px;color:var(--accent);word-break:break-all;">--</code>
+      </div>
+    </div>
+    <div class="settings-section">
+      <div class="settings-actions">
+        <button class="btn btn--ghost" onclick="logout()">Logout</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Dashboard View -->
+  <div class="app" id="dashboardView" style="display:none">
+    <div class="feed" id="activityFeed">
+      <div class="feed-empty" id="feedEmpty">No activity yet. Play something on Plex to see it here.</div>
     </div>
 
-    <div class="section" id="step2" style="display: none">
-      <h2>Step 2: Configure Trakt</h2>
-      <p>Create a Trakt API application at <a href="https://trakt.tv/oauth/applications/new" target="_blank" style="color: #e5a00d">trakt.tv/oauth/applications</a></p>
-      <p>Use this redirect URI: <code id="redirectUri">Loading...</code></p>
+    <div class="sync-panel" id="syncPanel">
+      <div class="sync-info">
+        <div class="sync-info-line" id="syncLastLine">Last sync: never</div>
+        <div class="sync-info-line" id="syncNextLine"></div>
+      </div>
+      <button class="btn btn--primary" id="syncNowBtn" onclick="syncNow()">Sync Now</button>
+      <span id="syncStatus" style="font-size:13px"></span>
+    </div>
+  </div>
 
+  <!-- Setup Wizard View -->
+  <div class="wizard" id="wizardView" style="display:none">
+    <!-- Step 1: Plex Login -->
+    <div class="wizard-step" id="wizardStep1">
+      <h2>Connect Plex</h2>
+      <p>Authenticate with your Plex account to verify server access.</p>
+      <button class="btn btn--primary" onclick="loginPlex()">Login with Plex</button>
+      <div class="form-status" id="plexStatus"></div>
+    </div>
+
+    <!-- Step 2: Trakt Config -->
+    <div class="wizard-step" id="wizardStep2" style="display:none">
+      <h2>Connect Trakt</h2>
+      <p>Create a Trakt API application at <a href="https://trakt.tv/oauth/applications/new" target="_blank">trakt.tv/oauth/applications</a></p>
+      <p>Redirect URI: <code id="redirectUri">--</code></p>
       <form onsubmit="saveTraktSecrets(event)">
-        <label>Trakt Client ID</label>
-        <input id="traktClientId" required />
-
-        <label>Trakt Client Secret</label>
-        <input id="traktClientSecret" type="password" required />
-
-        <button type="submit">Save & Authorize Trakt</button>
+        <div class="form-group">
+          <label class="form-label" for="traktClientId">Client ID</label>
+          <input class="form-input" id="traktClientId" required />
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="traktClientSecret">Client Secret</label>
+          <input class="form-input" id="traktClientSecret" type="password" required />
+        </div>
+        <button class="btn btn--primary" type="submit">Save & Authorize</button>
       </form>
-      <div id="traktStatus"></div>
+      <div class="form-status" id="traktStatus"></div>
     </div>
 
-    <div class="section" id="step3" style="display: none">
-      <h2>✅ Setup Complete!</h2>
-      <p class="status">Your Plex watch history will now automatically sync to Trakt.</p>
-      <p>
-        <strong>Note for server owner:</strong><br />
-        Configure the Plex webhook URL in your Plex server settings (Settings → Webhooks):
-      </p>
-      <p><code id="webhookUrl">Loading...</code></p>
-
-      <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #444">
-        <button id="syncNowBtn" onclick="syncNow()">⟳ Sync Now</button>
-        <span id="syncStatus" style="margin-left: 10px"></span>
-      </div>
-
-      <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #444">
-        <h3>Manage Settings</h3>
-        <button onclick="showTraktSettings()" style="background: #666">Change Trakt Credentials</button>
-        <button onclick="removeTraktCredentials()" style="background: #f44336; margin-left: 10px">Remove Trakt Connection</button>
-        <button onclick="logout()" style="background: #666; margin-left: 10px">Logout</button>
-      </div>
+    <!-- Step 3: Complete -->
+    <div class="wizard-step wizard-complete" id="wizardStep3" style="display:none">
+      <h2>Ready</h2>
+      <p>PlexTrakt is configured. Your watch history will sync automatically.</p>
+      <p style="margin-top:16px"><button class="btn btn--primary" onclick="finishSetup()">Go to Dashboard</button></p>
     </div>
+  </div>
 
-    <script>
-      let currentUserId = null
-      let pollInterval = null
+  <script>
+    /* ── State ── */
+    const state = {
+      connected: false,
+      activeSessions: new Map(),
+      lastSyncAt: null,
+      nextSyncAt: null,
+      setupComplete: false,
+      statusData: null,
+    }
 
-      // Get external URL and set redirect URI on page load
-      async function loadRedirectUri() {
-        try {
-          const res = await fetch("/api/config")
-          const data = await res.json()
-          const redirectUri = `${data.externalUrl}/auth/trakt/callback`
-          const webhookUrl = `${data.externalUrl}/webhooks/plex`
-          document.getElementById("redirectUri").textContent = redirectUri
-          document.getElementById("webhookUrl").textContent = webhookUrl
-        } catch (err) {
-          document.getElementById("redirectUri").textContent = "http://localhost:3000/auth/trakt/callback"
-          document.getElementById("webhookUrl").textContent = "http://localhost:3000/webhooks/plex"
-        }
+    let currentUserId = null
+    let pollInterval = null
+    let eventSource = null
+    let extrapolationFrame = null
+
+    /* ── Init ── */
+    async function init() {
+      await loadConfig()
+      await checkUserStatus()
+    }
+
+    async function loadConfig() {
+      try {
+        const res = await fetch('/api/config')
+        const data = await res.json()
+        const extUrl = data.externalUrl || 'http://localhost:3000'
+        const el = document.getElementById('redirectUri')
+        if (el) el.textContent = extUrl + '/auth/trakt/callback'
+        const wh = document.getElementById('settingsWebhookUrl')
+        if (wh) wh.textContent = extUrl + '/webhooks/plex'
+      } catch {}
+    }
+
+    async function checkUserStatus() {
+      const savedUserId = localStorage.getItem('plexTraktUserId')
+      if (!savedUserId) {
+        showWizard()
+        return
       }
 
-      // Run on page load
-      loadRedirectUri()
+      try {
+        const res = await fetch('/auth/plex/user-status/' + savedUserId)
+        const data = await res.json()
 
-      // Check if user is already logged in on page load
-      async function checkUserStatus() {
-        const savedUserId = localStorage.getItem("plexTraktUserId")
-        if (savedUserId) {
-          try {
-            const res = await fetch(`/auth/plex/user-status/${savedUserId}`)
-            const data = await res.json()
+        if (!data.ok) {
+          localStorage.removeItem('plexTraktUserId')
+          showWizard()
+          return
+        }
 
-            if (data.ok) {
-              currentUserId = parseInt(savedUserId)
-              document.getElementById("plexStatus").innerHTML = `<p class="status">✓ Logged in as ${data.username}</p>`
+        currentUserId = parseInt(savedUserId)
 
-              if (data.hasTraktTokens) {
-                // Fully configured
-                document.getElementById("step2").style.display = "none"
-                document.getElementById("step3").style.display = "block"
-              } else {
-                // Show step 2 and pre-fill if we have saved secrets
-                document.getElementById("step2").style.display = "block"
-                if (data.traktClientId) {
-                  document.getElementById("traktClientId").value = data.traktClientId
-                }
-              }
-            } else {
-              localStorage.removeItem("plexTraktUserId")
-            }
-          } catch (err) {
-            console.error("Error checking user status:", err)
+        if (data.hasTraktTokens) {
+          showDashboard(data.username)
+        } else {
+          showWizard()
+          document.getElementById('plexStatus').innerHTML = '<span class="form-status--ok">Connected as ' + escapeHtml(data.username) + '</span>'
+          document.getElementById('wizardStep2').style.display = 'block'
+          if (data.traktClientId) {
+            document.getElementById('traktClientId').value = data.traktClientId
           }
         }
+      } catch {
+        showWizard()
+      }
+    }
+
+    function showWizard() {
+      document.getElementById('wizardView').style.display = 'block'
+      document.getElementById('dashboardView').style.display = 'none'
+    }
+
+    function showDashboard(username) {
+      state.setupComplete = true
+      document.getElementById('wizardView').style.display = 'none'
+      document.getElementById('dashboardView').style.display = 'block'
+      document.getElementById('settingsPlexUser').textContent = username || '--'
+      connectEventSource()
+      fetchStatus()
+    }
+
+    function finishSetup() {
+      checkUserStatus()
+    }
+
+    /* ── SSE ── */
+    function connectEventSource() {
+      if (eventSource) eventSource.close()
+      eventSource = new EventSource('/api/events')
+      state.connected = true
+
+      eventSource.onmessage = (e) => {
+        try {
+          const event = JSON.parse(e.data)
+          handleEvent(event)
+        } catch {}
       }
 
-      // Run on page load
-      checkUserStatus()
+      eventSource.onerror = () => {
+        state.connected = false
+      }
 
-      async function loginPlex() {
-        try {
-          // Get Plex PIN and auth URL
-          const res = await fetch("/auth/plex/login-url")
-          const { url, pinId } = await res.json()
+      eventSource.onopen = () => {
+        state.connected = true
+      }
+    }
 
-          // Update status
-          document.getElementById("plexStatus").innerHTML = "<p>Opening Plex login... Please authorize in the popup window.</p>"
+    function handleEvent(event) {
+      switch (event.type) {
+        case 'scrobble':
+          if (event.data.action === 'start') {
+            addActivityItem('watching', event)
+          } else if (event.data.action === 'pause') {
+            updateOrAddItem('paused', event)
+          } else if (event.data.action === 'stop') {
+            removeActiveSession(event.data.title)
+            addActivityItem('stopped', event)
+          }
+          break
+        case 'watched':
+          removeActiveSession(event.data.title)
+          addActivityItem('watched', event)
+          break
+        case 'sync_start':
+          document.getElementById('syncStatus').innerHTML = '<span style="color:var(--text-secondary)">Syncing...</span>'
+          break
+        case 'sync_complete':
+          addActivityItem('synced', event)
+          state.lastSyncAt = event.timestamp
+          updateSyncPanel()
+          document.getElementById('syncStatus').textContent = ''
+          break
+        case 'sync_error':
+          addActivityItem('error', event)
+          document.getElementById('syncStatus').textContent = ''
+          break
+        case 'websocket_event':
+          addActivityItem('ws', event)
+          break
+        case 'status':
+          updateStatusDots(event.data)
+          break
+        case 'progress':
+          updateProgress(event.data)
+          break
+      }
+    }
 
-          // Open Plex auth in popup
-          const popup = window.open(url, "plex-auth", "width=600,height=700")
+    /* ── Activity Feed ── */
+    function addActivityItem(kind, event) {
+      const feed = document.getElementById('activityFeed')
+      const empty = document.getElementById('feedEmpty')
+      if (empty) empty.remove()
 
-          // Poll for authorization
-          pollInterval = setInterval(async () => {
+      const item = document.createElement('div')
+      item.className = 'activity-item activity-item--entering'
+
+      const icons = { watching: '▶', watched: '✓', synced: '⟳', error: '!', ws: '⚡', paused: '⏸', stopped: '⏹' }
+      const iconClasses = { watching: 'watching', watched: 'watched', synced: 'synced', error: 'error', ws: 'ws', paused: 'watching', stopped: 'synced' }
+      const badges = { watching: 'Watching', watched: 'Watched', synced: 'Synced', error: 'Error', ws: 'WebSocket', paused: 'Paused', stopped: 'Stopped' }
+      const badgeClasses = { watching: 'watching', watched: 'watched', synced: 'synced', error: 'error', ws: 'ws', paused: 'watching', stopped: 'synced' }
+
+      const d = event.data || {}
+      let title = d.title || ''
+      let meta = ''
+      let progressBar = ''
+
+      if (kind === 'watching') {
+        meta = [d.user, d.player].filter(Boolean).join(' · ')
+        const pct = d.progress != null ? d.progress.toFixed(1) : '0'
+        progressBar = '<div class="activity-progress"><div class="activity-progress-fill" style="width:' + pct + '%" data-session="' + escapeHtml(title) + '"></div></div>'
+        state.activeSessions.set(title, { progress: d.progress || 0, state: 'playing', updatedAt: Date.now() })
+      } else if (kind === 'watched') {
+        title += ' <span class="activity-check">✓</span>'
+        meta = d.user || ''
+      } else if (kind === 'synced') {
+        title = 'Full sync complete'
+        const dur = d.duration ? (d.duration / 1000).toFixed(1) + 's' : ''
+        meta = dur
+      } else if (kind === 'error') {
+        title = d.message || 'Sync error'
+      } else if (kind === 'ws') {
+        const subtypes = { library_scan: 'Library scan detected', mark_watched: 'Marked watched', mark_unwatched: 'Marked unwatched' }
+        title = d.title || subtypes[d.subtype] || d.subtype || 'WebSocket event'
+        meta = subtypes[d.subtype] || ''
+      }
+
+      item.innerHTML =
+        '<div class="activity-icon activity-icon--' + iconClasses[kind] + '">' + icons[kind] + '</div>' +
+        '<div class="activity-body">' +
+          '<div class="activity-header">' +
+            '<span class="activity-badge badge--' + badgeClasses[kind] + '">' + badges[kind] + '</span>' +
+            '<span class="activity-time">' + formatTime(event.timestamp) + '</span>' +
+          '</div>' +
+          '<div class="activity-title">' + title + '</div>' +
+          (meta ? '<div class="activity-meta">' + escapeHtml(meta) + '</div>' : '') +
+          progressBar +
+        '</div>'
+
+      feed.insertBefore(item, feed.firstChild)
+
+      // Cap feed at 100 items
+      while (feed.children.length > 100) feed.removeChild(feed.lastChild)
+
+      // Remove entering class after animation
+      setTimeout(() => item.classList.remove('activity-item--entering'), 200)
+    }
+
+    function updateOrAddItem(kind, event) {
+      const session = state.activeSessions.get(event.data.title)
+      if (session) {
+        session.state = kind === 'paused' ? 'paused' : 'playing'
+        session.progress = event.data.progress || session.progress
+        session.updatedAt = Date.now()
+      }
+      addActivityItem(kind, event)
+    }
+
+    function removeActiveSession(title) {
+      state.activeSessions.delete(title)
+    }
+
+    function updateProgress(data) {
+      const fills = document.querySelectorAll('.activity-progress-fill')
+      for (const fill of fills) {
+        if (fill.dataset.session === data.ratingKey || fill.dataset.session === data.sessionKey) {
+          const pct = data.progress != null ? Math.min(100, Math.max(0, data.progress)) : 0
+          fill.style.width = pct + '%'
+        }
+      }
+    }
+
+    /* ── Status Dots ── */
+    function updateStatusDots(data) {
+      if (data.plex !== undefined) setDot('dotPlex', data.plex === 'connected' ? 'green' : data.plex === 'error' ? 'red' : 'gray')
+      if (data.trakt !== undefined) setDot('dotTrakt', data.trakt === 'connected' ? 'green' : data.trakt === 'expired' ? 'yellow' : data.trakt === 'error' ? 'red' : 'gray')
+      if (data.websocket !== undefined) setDot('dotWs', data.websocket === 'connected' ? 'green' : data.websocket === 'reconnecting' ? 'yellow' : 'red')
+    }
+
+    function setDot(id, color) {
+      const dot = document.getElementById(id)
+      if (!dot) return
+      dot.className = 'status-dot status-dot--' + color
+      if (color === 'green') {
+        dot.classList.add('status-dot--reconnect')
+        setTimeout(() => dot.classList.remove('status-dot--reconnect'), 300)
+      }
+    }
+
+    /* ── Status Fetch ── */
+    async function fetchStatus() {
+      try {
+        const res = await fetch('/api/status')
+        const data = await res.json()
+        state.statusData = data
+
+        setDot('dotPlex', data.plex.connected ? 'green' : 'red')
+        setDot('dotTrakt', data.trakt.connected ? 'green' : 'red')
+        setDot('dotWs', data.websocket.connected ? 'green' : data.websocket.state === 'reconnecting' ? 'yellow' : 'red')
+
+        // Settings panel
+        const plexSt = document.getElementById('settingsPlexStatus')
+        plexSt.textContent = data.plex.connected ? 'Connected' : 'Disconnected'
+        plexSt.className = 'settings-row-value settings-row-value--' + (data.plex.connected ? 'green' : 'red')
+
+        const traktSt = document.getElementById('settingsTraktStatus')
+        traktSt.textContent = data.trakt.connected ? 'Connected' : 'Not connected'
+        traktSt.className = 'settings-row-value settings-row-value--' + (data.trakt.connected ? 'green' : 'red')
+
+        const traktExp = document.getElementById('settingsTraktExpiry')
+        if (data.trakt.tokenExpiresAt) {
+          const exp = new Date(data.trakt.tokenExpiresAt)
+          const days = Math.ceil((exp - Date.now()) / (1000 * 60 * 60 * 24))
+          traktExp.textContent = days > 0 ? 'in ' + days + ' days' : 'expired'
+          traktExp.className = 'settings-row-value settings-row-value--' + (days > 7 ? 'green' : days > 0 ? 'yellow' : 'red')
+        }
+
+        const wsSt = document.getElementById('settingsWsStatus')
+        wsSt.textContent = data.websocket.connected ? 'Connected' : data.websocket.state
+        wsSt.className = 'settings-row-value settings-row-value--' + (data.websocket.connected ? 'green' : 'yellow')
+
+        document.getElementById('settingsWsReconnects').textContent = data.websocket.reconnectCount
+
+        if (data.sync.lastResult) {
+          state.lastSyncAt = data.sync.lastResult.timestamp || null
+        }
+        updateSyncPanel()
+
+      } catch {}
+
+      // Refresh every 60s
+      setTimeout(fetchStatus, 60000)
+    }
+
+    /* ── Sync Panel ── */
+    function updateSyncPanel() {
+      const lastLine = document.getElementById('syncLastLine')
+      if (state.lastSyncAt) {
+        lastLine.innerHTML = 'Last sync: <strong>' + formatTime(state.lastSyncAt) + '</strong>'
+      }
+    }
+
+    /* ── Sync Now ── */
+    async function syncNow() {
+      const btn = document.getElementById('syncNowBtn')
+      const status = document.getElementById('syncStatus')
+      btn.disabled = true
+      status.innerHTML = '<span style="color:var(--text-secondary)">Syncing...</span>'
+
+      try {
+        const res = await fetch('/api/sync', { method: 'POST' })
+        const data = await res.json()
+        if (res.ok) {
+          status.innerHTML = '<span style="color:var(--success)">Done</span>'
+          setTimeout(() => { status.textContent = '' }, 3000)
+        } else {
+          status.innerHTML = '<span style="color:var(--error)">' + escapeHtml(data.error) + '</span>'
+        }
+      } catch (err) {
+        status.innerHTML = '<span style="color:var(--error)">' + escapeHtml(err.message) + '</span>'
+      }
+
+      let cooldown = 10
+      btn.textContent = 'Sync Now (' + cooldown + 's)'
+      const timer = setInterval(() => {
+        cooldown--
+        if (cooldown <= 0) {
+          clearInterval(timer)
+          btn.disabled = false
+          btn.textContent = 'Sync Now'
+        } else {
+          btn.textContent = 'Sync Now (' + cooldown + 's)'
+        }
+      }, 1000)
+    }
+
+    /* ── Plex Auth ── */
+    async function loginPlex() {
+      try {
+        const res = await fetch('/auth/plex/login-url')
+        const { url, pinId } = await res.json()
+        document.getElementById('plexStatus').innerHTML = '<span class="form-status--pending">Opening Plex login...</span>'
+        const popup = window.open(url, 'plex-auth', 'width=600,height=700')
+
+        pollInterval = setInterval(async () => {
+          try {
+            const checkRes = await fetch('/auth/plex/check-pin/' + pinId)
+            const data = await checkRes.json()
+            if (data.error) {
+              clearInterval(pollInterval)
+              document.getElementById('plexStatus').innerHTML = '<span class="form-status--error">' + escapeHtml(data.error) + '</span>'
+              return
+            }
+            if (data.authorized) {
+              clearInterval(pollInterval)
+              currentUserId = data.userId
+              localStorage.setItem('plexTraktUserId', data.userId)
+              document.getElementById('plexStatus').innerHTML = '<span class="form-status--ok">Connected as ' + escapeHtml(data.username) + '</span>'
+              document.getElementById('wizardStep2').style.display = 'block'
+              if (popup && !popup.closed) popup.close()
+            }
+          } catch {}
+        }, 1000)
+
+        setTimeout(() => {
+          if (pollInterval) {
+            clearInterval(pollInterval)
+            document.getElementById('plexStatus').innerHTML = '<span class="form-status--error">Timed out. Try again.</span>'
+          }
+        }, 300000)
+      } catch (err) {
+        document.getElementById('plexStatus').innerHTML = '<span class="form-status--error">' + escapeHtml(err.message) + '</span>'
+      }
+    }
+
+    /* ── Trakt Auth ── */
+    async function saveTraktSecrets(e) {
+      e.preventDefault()
+      const clientId = document.getElementById('traktClientId').value
+      const clientSecret = document.getElementById('traktClientSecret').value
+
+      try {
+        await fetch('/auth/trakt/save-secrets', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: currentUserId, traktClientId: clientId, traktClientSecret: clientSecret }),
+        })
+
+        const res = await fetch('/auth/trakt/authorize?userId=' + currentUserId)
+        const { url } = await res.json()
+        const popup = window.open(url, 'trakt-auth', 'width=600,height=700')
+
+        document.getElementById('traktStatus').innerHTML = '<span class="form-status--pending">Authorize in the popup...</span>'
+
+        const handler = async (event) => {
+          if (event.data && event.data.type === 'trakt-code') {
+            window.removeEventListener('message', handler)
             try {
-              const checkRes = await fetch(`/auth/plex/check-pin/${pinId}`)
-              const data = await checkRes.json()
-
+              const tokenRes = await fetch('/auth/trakt/callback', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ userId: currentUserId, code: event.data.code }),
+              })
+              const data = await tokenRes.json()
               if (data.error) {
-                clearInterval(pollInterval)
-                document.getElementById("plexStatus").innerHTML = `<p class="error">${data.error}</p>`
+                document.getElementById('traktStatus').innerHTML = '<span class="form-status--error">' + escapeHtml(data.error) + '</span>'
                 return
               }
-
-              if (data.authorized) {
-                clearInterval(pollInterval)
-                currentUserId = data.userId
-                localStorage.setItem("plexTraktUserId", data.userId)
-                document.getElementById("plexStatus").innerHTML = `<p class="status">✓ Plex authenticated as ${data.username}!</p>`
-
-                // Check if user already has Trakt configured
-                checkUserStatus()
-
-                if (popup && !popup.closed) popup.close()
-              }
+              document.getElementById('wizardStep2').style.display = 'none'
+              document.getElementById('wizardStep3').style.display = 'block'
             } catch (err) {
-              console.error("Poll error:", err)
-            }
-          }, 1000) // Poll every second
-
-          // Stop polling after 5 minutes
-          setTimeout(() => {
-            if (pollInterval) {
-              clearInterval(pollInterval)
-              document.getElementById("plexStatus").innerHTML = '<p class="error">Authentication timed out. Please try again.</p>'
-            }
-          }, 300000)
-        } catch (err) {
-          document.getElementById("plexStatus").innerHTML = `<p class="error">Error: ${err.message}</p>`
-        }
-      }
-
-      async function saveTraktSecrets(e) {
-        e.preventDefault()
-
-        const traktClientId = document.getElementById("traktClientId").value
-        const traktClientSecret = document.getElementById("traktClientSecret").value
-
-        try {
-          // Save secrets
-          await fetch("/auth/trakt/save-secrets", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ userId: currentUserId, traktClientId, traktClientSecret }),
-          })
-
-          // Get authorization URL
-          const res = await fetch(`/auth/trakt/authorize?userId=${currentUserId}`)
-          const { url } = await res.json()
-
-          // Open Trakt auth
-          const popup = window.open(url, "trakt-auth", "width=600,height=700")
-
-          document.getElementById("traktStatus").innerHTML = "<p>Please authorize in the popup window...</p>"
-
-          // Listen for message from popup
-          const messageHandler = async (event) => {
-            if (event.data && event.data.type === "trakt-code") {
-              window.removeEventListener("message", messageHandler)
-              const code = event.data.code
-
-              try {
-                // Exchange code for tokens
-                const tokenRes = await fetch("/auth/trakt/callback", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ userId: currentUserId, code }),
-                })
-
-                const data = await tokenRes.json()
-                if (data.error) {
-                  document.getElementById("traktStatus").innerHTML = `<p class="error">${data.error}</p>`
-                  return
-                }
-
-                document.getElementById("step3").style.display = "block"
-                document.getElementById("step2").style.display = "none"
-              } catch (err) {
-                document.getElementById("traktStatus").innerHTML = `<p class="error">Error: ${err.message}</p>`
-              }
+              document.getElementById('traktStatus').innerHTML = '<span class="form-status--error">' + escapeHtml(err.message) + '</span>'
             }
           }
-
-          window.addEventListener("message", messageHandler)
-
-          // Timeout after 5 minutes
-          setTimeout(() => {
-            window.removeEventListener("message", messageHandler)
-            if (document.getElementById("step3").style.display === "none") {
-              document.getElementById("traktStatus").innerHTML = '<p class="error">Authentication timed out. Please try again.</p>'
-            }
-          }, 300000)
-        } catch (err) {
-          document.getElementById("traktStatus").innerHTML = `<p class="error">Error: ${err.message}</p>`
         }
+        window.addEventListener('message', handler)
+        setTimeout(() => { window.removeEventListener('message', handler) }, 300000)
+      } catch (err) {
+        document.getElementById('traktStatus').innerHTML = '<span class="form-status--error">' + escapeHtml(err.message) + '</span>'
       }
+    }
 
-      function showTraktSettings() {
-        document.getElementById("step3").style.display = "none"
-        document.getElementById("step2").style.display = "block"
-        document.getElementById("traktStatus").innerHTML = "<p>Update your Trakt credentials below</p>"
-      }
+    /* ── Settings Actions ── */
+    function showTraktSettings() {
+      closeSettings()
+      document.getElementById('dashboardView').style.display = 'none'
+      document.getElementById('wizardView').style.display = 'block'
+      document.getElementById('wizardStep1').style.display = 'none'
+      document.getElementById('wizardStep2').style.display = 'block'
+      document.getElementById('wizardStep3').style.display = 'none'
+    }
 
-      async function removeTraktCredentials() {
-        if (!confirm("Are you sure you want to remove your Trakt connection? This will delete your Trakt credentials and tokens.")) {
-          return
+    async function removeTraktCredentials() {
+      if (!confirm('Remove Trakt connection? This deletes your credentials and tokens.')) return
+      try {
+        const res = await fetch('/auth/trakt/remove', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: currentUserId }),
+        })
+        const data = await res.json()
+        if (data.ok) {
+          closeSettings()
+          showWizard()
+          document.getElementById('wizardStep1').style.display = 'none'
+          document.getElementById('wizardStep2').style.display = 'block'
+          document.getElementById('traktClientId').value = ''
+          document.getElementById('traktClientSecret').value = ''
         }
+      } catch {}
+    }
 
-        try {
-          const res = await fetch("/auth/trakt/remove", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ userId: currentUserId }),
-          })
+    function logout() {
+      if (!confirm('Logout?')) return
+      localStorage.removeItem('plexTraktUserId')
+      location.reload()
+    }
 
-          const data = await res.json()
-          if (data.ok) {
-            document.getElementById("step3").style.display = "none"
-            document.getElementById("step2").style.display = "block"
-            document.getElementById("traktClientId").value = ""
-            document.getElementById("traktClientSecret").value = ""
-            document.getElementById("traktStatus").innerHTML = '<p class="status">Trakt connection removed. You can set up a new connection below.</p>'
-          } else {
-            alert("Failed to remove Trakt credentials")
-          }
-        } catch (err) {
-          alert("Error: " + err.message)
-        }
-      }
+    /* ── Settings Panel Toggle ── */
+    document.getElementById('gearBtn').addEventListener('click', () => {
+      document.getElementById('settingsOverlay').classList.add('open')
+      document.getElementById('settingsPanel').classList.add('open')
+    })
 
-      async function syncNow() {
-        const btn = document.getElementById("syncNowBtn")
-        const status = document.getElementById("syncStatus")
-        btn.disabled = true
-        btn.style.opacity = "0.5"
-        status.innerHTML = '<span style="color: #aaa">Syncing...</span>'
+    function closeSettings() {
+      document.getElementById('settingsOverlay').classList.remove('open')
+      document.getElementById('settingsPanel').classList.remove('open')
+    }
 
-        try {
-          const res = await fetch("/api/sync", { method: "POST" })
-          const data = await res.json()
-          if (res.ok) {
-            status.innerHTML = '<span class="status">✓ Sync complete</span>'
-          } else {
-            status.innerHTML = `<span class="error">${data.error}</span>`
-          }
-        } catch (err) {
-          status.innerHTML = `<span class="error">Error: ${err.message}</span>`
-        }
+    document.getElementById('settingsClose').addEventListener('click', closeSettings)
+    document.getElementById('settingsOverlay').addEventListener('click', closeSettings)
 
-        let cooldown = 10
-        btn.textContent = `⟳ Sync Now (${cooldown}s)`
-        const timer = setInterval(() => {
-          cooldown--
-          if (cooldown <= 0) {
-            clearInterval(timer)
-            btn.disabled = false
-            btn.style.opacity = "1"
-            btn.textContent = "⟳ Sync Now"
-          } else {
-            btn.textContent = `⟳ Sync Now (${cooldown}s)`
-          }
-        }, 1000)
-      }
+    /* ── Helpers ── */
+    function formatTime(ts) {
+      if (!ts) return ''
+      const diff = Math.floor((Date.now() - ts) / 1000)
+      if (diff < 5) return 'just now'
+      if (diff < 60) return diff + 's ago'
+      if (diff < 3600) return Math.floor(diff / 60) + 'm ago'
+      if (diff < 86400) return Math.floor(diff / 3600) + 'h ago'
+      return Math.floor(diff / 86400) + 'd ago'
+    }
 
-      function logout() {
-        if (!confirm("Are you sure you want to logout?")) {
-          return
-        }
-        localStorage.removeItem("plexTraktUserId")
-        location.reload()
-      }
-    </script>
-  </body>
+    function escapeHtml(s) {
+      if (!s) return ''
+      return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+    }
+
+    /* ── Boot ── */
+    init()
+  </script>
+</body>
 </html>

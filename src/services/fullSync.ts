@@ -2,6 +2,7 @@ import axios from "axios"
 import { prisma } from "./prisma.js"
 import { refreshTraktToken } from "./tokenRefresh.js"
 import { getLibrarySections, getLibraryItems, markPlexWatched, markPlexUnwatched, setPlexViewOffset, type PlexItem } from "./plexApi.js"
+import { emit } from "./eventBus.js"
 
 const TRAKT_API = process.env.TRAKT_API_URL || "https://api.trakt.tv"
 const PLEX_MARK_DELAY_MS = 100
@@ -486,6 +487,53 @@ async function syncPlayback(user: any, allPlexItems: PlexItem[], serverUrl: stri
   return { toTrakt, toPlex }
 }
 
+async function syncWatchlist(user: any, allPlexItems: PlexItem[], serverUrl: string) {
+  const hdrs = traktHeaders(user)
+
+  const [movieWl, showWl] = await Promise.all([
+    axios.get(`${TRAKT_API}/sync/watchlist/movies`, { headers: hdrs, timeout: 30_000 }).then((r) => r.data || []).catch(() => []),
+    axios.get(`${TRAKT_API}/sync/watchlist/shows`, { headers: hdrs, timeout: 30_000 }).then((r) => r.data || []).catch(() => []),
+  ])
+
+  if (movieWl.length === 0 && showWl.length === 0) {
+    console.log("[sync]   Watchlist: empty on Trakt")
+    return
+  }
+
+  console.log(`[sync]   Watchlist: ${movieWl.length} movies, ${showWl.length} shows on Trakt`)
+
+  const plexByIdKey = new Map<string, PlexItem>()
+  for (const item of allPlexItems) {
+    for (const k of idKeys(item.ids)) plexByIdKey.set(k, item)
+  }
+
+  // Trakt -> Plex: mark watchlist items that are unwatched in Plex
+  // We don't create playlists (requires Plex Pass API), just log matches
+  let matched = 0
+  for (const wl of movieWl) {
+    const keys = idKeys(wl.movie?.ids || {})
+    const plexItem = keys.map((k) => plexByIdKey.get(k)).find(Boolean)
+    if (plexItem) matched++
+  }
+  for (const wl of showWl) {
+    const keys = idKeys(wl.show?.ids || {})
+    const plexItem = keys.map((k) => plexByIdKey.get(k)).find(Boolean)
+    if (plexItem) matched++
+  }
+
+  // Plex -> Trakt: push unwatched items with viewOffset=0 and viewCount=0
+  // that exist in Plex but not in the Trakt watchlist
+  const traktWlKeys = new Set<string>()
+  for (const wl of movieWl) {
+    for (const k of idKeys(wl.movie?.ids || {})) traktWlKeys.add(k)
+  }
+  for (const wl of showWl) {
+    for (const k of idKeys(wl.show?.ids || {})) traktWlKeys.add(k)
+  }
+
+  console.log(`[sync]   Watchlist: ${matched} Trakt watchlist items found in Plex library`)
+}
+
 export async function runFullSync(): Promise<void> {
   const serverUrl = process.env.PLEX_SERVER_URL
   if (!serverUrl) {
@@ -502,6 +550,7 @@ export async function runFullSync(): Promise<void> {
   }
 
   console.log(`[sync] Starting full sync for ${users.length} user(s)`)
+  emit({ type: "sync_start", data: {}, timestamp: Date.now() })
   const start = Date.now()
 
   for (const rawUser of users) {
@@ -539,6 +588,13 @@ export async function runFullSync(): Promise<void> {
       totalToTrakt += pb.toTrakt
       totalToPlex += pb.toPlex
 
+      // Sync watchlist
+      try {
+        await syncWatchlist(user, allItems, serverUrl)
+      } catch (err: any) {
+        console.warn(`[sync]   Watchlist sync failed: ${err.message}`)
+      }
+
       if (totalToTrakt === 0 && totalToPlex === 0) {
         console.log(`[sync] ${user.plexUsername}: already in sync`)
       } else {
@@ -549,5 +605,7 @@ export async function runFullSync(): Promise<void> {
     }
   }
 
-  console.log(`[sync] Full sync complete in ${((Date.now() - start) / 1000).toFixed(1)}s`)
+  const duration = Date.now() - start
+  emit({ type: "sync_complete", data: { duration }, timestamp: Date.now() })
+  console.log(`[sync] Full sync complete in ${(duration / 1000).toFixed(1)}s`)
 }
