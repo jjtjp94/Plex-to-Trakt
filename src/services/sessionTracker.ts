@@ -53,6 +53,14 @@ export function getSession(key: string): TrackedSession | undefined {
   return sessions.get(key)
 }
 
+export function getActiveSessionCount(): number {
+  return sessions.size
+}
+
+export function getActiveSessions(): TrackedSession[] {
+  return [...sessions.values()]
+}
+
 /** Progress we believe the session is at right now, extrapolated while playing. */
 export function extrapolatedProgress(s: TrackedSession): number {
   if (s.state !== "playing" || s.durationMs <= 0) return s.progress

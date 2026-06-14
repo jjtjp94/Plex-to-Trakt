@@ -94,95 +94,6 @@ async function handleActivityNotification(notifications: any[]) {
   }
 }
 
-async function handleTimelineEntry(entries: any[]) {
-  const serverUrl = process.env.PLEX_SERVER_URL
-  if (!serverUrl) return
-
-  const token = await getToken()
-  if (!token) return
-
-  for (const entry of entries) {
-    const { type, itemID, state, identifier } = entry
-    if (identifier !== "com.plexapp.plugins.library") continue
-    // type 1 = movie, 4 = episode
-    if (type !== 1 && type !== 4) continue
-    // state 5 = watched/unwatched change
-    if (state !== 5) continue
-
-    const ratingKey = String(itemID)
-    const mdType = type === 1 ? "movie" : "episode"
-
-    try {
-      const res = await axios.get(`${serverUrl.replace(/\/$/, "")}/library/metadata/${ratingKey}?includeGuids=1`, {
-        headers: { "X-Plex-Token": token, Accept: "application/json" },
-        timeout: 10_000,
-      })
-
-      const md = res.data?.MediaContainer?.Metadata?.[0]
-      if (!md) continue
-
-      const viewCount = Number(md.viewCount) || 0
-      const title = md.title || "Unknown"
-
-      const ids: Record<string, any> = {}
-      const guids = md.Guid || []
-      for (const g of guids) {
-        const gid = typeof g === "string" ? g : g?.id
-        if (!gid) continue
-        let m = gid.match(/(?:themoviedb|tmdb):\/\/(\d+)/i)
-        if (m) ids.tmdb = Number(m[1])
-        m = gid.match(/imdb:\/\/(tt\d+)/i)
-        if (m) ids.imdb = m[1]
-        m = gid.match(/(?:thetvdb|tvdb):\/\/(\d+)/i)
-        if (m) ids.tvdb = Number(m[1])
-      }
-
-      if (Object.keys(ids).length === 0) continue
-
-      const users = await prisma.user.findMany({
-        where: { traktAccessToken: { not: null } },
-      })
-
-      for (let user of users) {
-        user = await refreshTraktToken(user)
-        const syncUnwatched = process.env.SYNC_UNWATCHED === "true"
-
-        if (viewCount > 0) {
-          const body = mdType === "movie"
-            ? { movies: [{ ids, title }] }
-            : { episodes: [{ ids, title }] }
-          await axios.post(`${TRAKT_API}/sync/history`, body, {
-            headers: traktHeaders(user),
-            timeout: 10_000,
-          })
-          console.log(`[ws] "${title}" marked watched -> synced to Trakt`)
-          emit({
-            type: "websocket_event",
-            data: { subtype: "mark_watched", title },
-            timestamp: Date.now(),
-          })
-        } else if (syncUnwatched) {
-          const body = mdType === "movie"
-            ? { movies: [{ ids }] }
-            : { episodes: [{ ids }] }
-          await axios.post(`${TRAKT_API}/sync/history/remove`, body, {
-            headers: traktHeaders(user),
-            timeout: 10_000,
-          })
-          console.log(`[ws] "${title}" marked unwatched -> removed from Trakt`)
-          emit({
-            type: "websocket_event",
-            data: { subtype: "mark_unwatched", title },
-            timestamp: Date.now(),
-          })
-        }
-      }
-    } catch (err: any) {
-      console.error(`[ws] TimelineEntry sync failed for ratingKey ${ratingKey}:`, err.message)
-    }
-  }
-}
-
 export async function syncLibrarySection(sectionKey: string) {
   const serverUrl = process.env.PLEX_SERVER_URL
   if (!serverUrl) return
@@ -375,10 +286,6 @@ function connect(serverUrl: string, token: string) {
       } else if (type === "activity" && container.ActivityNotification) {
         handleActivityNotification(container.ActivityNotification).catch((e) =>
           console.error("[ws] Activity handler error:", e.message)
-        )
-      } else if (type === "timeline" && container.TimelineEntry) {
-        handleTimelineEntry(container.TimelineEntry).catch((e) =>
-          console.error("[ws] Timeline handler error:", e.message)
         )
       }
     } catch (err: any) {

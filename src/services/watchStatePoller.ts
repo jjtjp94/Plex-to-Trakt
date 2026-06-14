@@ -1,24 +1,50 @@
 import axios from "axios"
 import { prisma } from "./prisma.js"
 import { refreshTraktToken } from "./tokenRefresh.js"
-import { getLibrarySections, getLibraryItems, extractAllIds, type PlexItem } from "./plexApi.js"
+import { extractAllIds, type PlexItem } from "./plexApi.js"
+import { emit } from "./eventBus.js"
 
 const TRAKT_API = process.env.TRAKT_API_URL || "https://api.trakt.tv"
-const POLL_INTERVAL_MS = 5 * 60 * 1000 // 5 minutes
+const DEFAULT_POLL_MS = 15_000
+
+let pollInterval = parsePollInterval()
+let pollTimer: NodeJS.Timeout | null = null
+let lastPollAt = 0
 
 interface CachedState {
   viewCount: number
-  viewOffset: number
-  ids: Record<string, string | number>
-  type: string
-  title: string
+  lastViewedAt: number
 }
 
-const stateCache = new Map<string, Map<string, CachedState>>()
-let cachedSections: { key: string; type: string }[] | null = null
+const stateCache = new Map<string, CachedState>()
+let seeded = false
 
-function cacheKey(userId: number) {
-  return `user:${userId}`
+function parsePollInterval(): number {
+  const raw = process.env.WATCH_POLL_INTERVAL
+  if (!raw || raw === "0") return 0
+  const seconds = parseInt(raw, 10)
+  if (isNaN(seconds) || seconds <= 0) return DEFAULT_POLL_MS
+  return seconds * 1000
+}
+
+export function getPollerState() {
+  return { enabled: pollInterval > 0, intervalMs: pollInterval, lastPollAt, seeded }
+}
+
+export function restartPoller() {
+  if (pollTimer) {
+    clearInterval(pollTimer)
+    pollTimer = null
+  }
+  pollInterval = parsePollInterval()
+  if (pollInterval > 0 && process.env.PLEX_SERVER_URL) {
+    pollTimer = setInterval(() => {
+      pollRecentChanges(process.env.PLEX_SERVER_URL!).catch((e) =>
+        console.error("[watch-poll] Error:", e.message)
+      )
+    }, pollInterval)
+    console.log(`[watch-poll] Restarted with ${pollInterval / 1000}s interval`)
+  }
 }
 
 function traktHeaders(user: any) {
@@ -58,35 +84,37 @@ async function removeFromTraktPlayback(user: any, ids: Record<string, any>, titl
   }
 }
 
-async function syncItemChange(user: any, item: PlexItem, prev: CachedState) {
-  const watchChanged = item.viewCount !== prev.viewCount
-  const progressCleared = prev.viewOffset > 0 && item.viewOffset === 0 && item.viewCount === 0
-
-  if (!watchChanged && !progressCleared) return
-
-  const ids = item.ids
+async function syncItemToTrakt(user: any, ratingKey: string, item: any, prevViewCount: number) {
+  const ids = extractAllIds(item.guid, item.Guid)
   if (Object.keys(ids).length === 0) return
 
   const mdType = item.type === "movie" ? "movie" : item.type === "episode" ? "episode" : null
   if (!mdType) return
 
+  const viewCount = Number(item.viewCount) || 0
+  const title = item.title || "Unknown"
   const syncUnwatched = process.env.SYNC_UNWATCHED === "true"
 
   try {
     user = await refreshTraktToken(user)
 
-    if (watchChanged && item.viewCount > prev.viewCount) {
-      console.log(`[watch-poll] Change: "${item.title}" viewCount ${prev.viewCount} -> ${item.viewCount}`)
+    if (viewCount > prevViewCount) {
+      console.log(`[watch-poll] "${title}" viewCount ${prevViewCount} -> ${viewCount}`)
       const body = mdType === "movie"
-        ? { movies: [{ ids, title: item.title }] }
-        : { episodes: [{ ids, title: item.title }] }
+        ? { movies: [{ ids, title }] }
+        : { episodes: [{ ids, title }] }
       await axios.post(`${TRAKT_API}/sync/history`, body, {
         headers: traktHeaders(user),
         timeout: 10_000,
       })
-      console.log(`[watch-poll] "${item.title}" marked watched -> synced to Trakt`)
-    } else if (watchChanged && item.viewCount < prev.viewCount && syncUnwatched) {
-      console.log(`[watch-poll] Change: "${item.title}" viewCount ${prev.viewCount} -> ${item.viewCount}`)
+      console.log(`[watch-poll] "${title}" marked watched -> synced to Trakt`)
+      emit({
+        type: "websocket_event",
+        data: { subtype: "mark_watched", title },
+        timestamp: Date.now(),
+      })
+    } else if (viewCount < prevViewCount && syncUnwatched) {
+      console.log(`[watch-poll] "${title}" viewCount ${prevViewCount} -> ${viewCount}`)
       const body = mdType === "movie"
         ? { movies: [{ ids }] }
         : { episodes: [{ ids }] }
@@ -94,19 +122,30 @@ async function syncItemChange(user: any, item: PlexItem, prev: CachedState) {
         headers: traktHeaders(user),
         timeout: 10_000,
       })
-      console.log(`[watch-poll] "${item.title}" marked unwatched -> removed from Trakt history`)
-    }
-
-    if (progressCleared) {
-      console.log(`[watch-poll] Change: "${item.title}" viewOffset ${prev.viewOffset} -> 0 (progress cleared)`)
-      await removeFromTraktPlayback(user, ids, item.title)
+      console.log(`[watch-poll] "${title}" marked unwatched -> removed from Trakt history`)
+      emit({
+        type: "websocket_event",
+        data: { subtype: "mark_unwatched", title },
+        timestamp: Date.now(),
+      })
     }
   } catch (err: any) {
-    console.warn(`[watch-poll] Failed to sync "${item.title}": ${err.message}`)
+    console.warn(`[watch-poll] Failed to sync "${title}": ${err.message}`)
   }
 }
 
-async function pollAllItems(serverUrl: string) {
+async function fetchRecentItems(serverUrl: string, token: string, sectionKey: string, type: "movie" | "episode"): Promise<any[]> {
+  const base = serverUrl.replace(/\/$/, "")
+  const typeNum = type === "episode" ? "4" : "1"
+  const url = `${base}/library/sections/${sectionKey}/all?type=${typeNum}&sort=lastViewedAt:desc&X-Plex-Container-Size=10&X-Plex-Container-Start=0&includeGuids=1`
+  const res = await axios.get(url, {
+    headers: { "X-Plex-Token": token, Accept: "application/json" },
+    timeout: 15_000,
+  })
+  return res.data?.MediaContainer?.Metadata || []
+}
+
+async function pollRecentChanges(serverUrl: string) {
   const users = await prisma.user.findMany({
     where: { traktAccessToken: { not: null }, plexAuthToken: { not: null } },
   })
@@ -116,58 +155,53 @@ async function pollAllItems(serverUrl: string) {
     const token = user.plexAuthToken
     if (!token) continue
 
-    if (!cachedSections) {
-      cachedSections = await getLibrarySections(serverUrl, token)
-    }
-
-    const items: PlexItem[] = []
-    for (const section of cachedSections) {
-      if (section.type === "movie") {
-        items.push(...await getLibraryItems(serverUrl, token, section.key, "movie"))
-      } else if (section.type === "show") {
-        items.push(...await getLibraryItems(serverUrl, token, section.key, "episode"))
-      }
-    }
-
-    const userKey = cacheKey(user.id)
-    const cache = stateCache.get(userKey)
-
-    if (!cache) {
-      // First run: seed cache
-      const newCache = new Map<string, CachedState>()
-      for (const item of items) {
-        newCache.set(item.ratingKey, {
-          viewCount: item.viewCount,
-          viewOffset: item.viewOffset,
-          ids: item.ids,
-          type: item.type,
-          title: item.title,
-        })
-      }
-      stateCache.set(userKey, newCache)
-      console.log(`[watch-poll] Seeded cache with ${items.length} items for ${user.plexUsername || user.plexId}`)
-      continue
-    }
-
-    let changes = 0
-    for (const item of items) {
-      const prev = cache.get(item.ratingKey)
-      cache.set(item.ratingKey, {
-        viewCount: item.viewCount,
-        viewOffset: item.viewOffset,
-        ids: item.ids,
-        type: item.type,
-        title: item.title,
+    try {
+      const sectionsRes = await axios.get(`${serverUrl.replace(/\/$/, "")}/library/sections`, {
+        headers: { "X-Plex-Token": token, Accept: "application/json" },
+        timeout: 15_000,
       })
+      const sections = sectionsRes.data?.MediaContainer?.Directory || []
 
-      if (!prev) continue
-      if (item.viewCount === prev.viewCount && (item.viewOffset === prev.viewOffset || !(prev.viewOffset > 0 && item.viewOffset === 0 && item.viewCount === 0))) continue
+      let changes = 0
+      let checked = 0
 
-      changes++
-      await syncItemChange(user, item, prev)
+      for (const section of sections) {
+        const types: ("movie" | "episode")[] =
+          section.type === "movie" ? ["movie"] :
+          section.type === "show" ? ["episode"] : []
+
+        for (const type of types) {
+          const items = await fetchRecentItems(serverUrl, token, section.key, type)
+
+          for (const item of items) {
+            const rk = String(item.ratingKey)
+            const viewCount = Number(item.viewCount) || 0
+            const lastViewedAt = Number(item.lastViewedAt) || 0
+            checked++
+
+            const prev = stateCache.get(rk)
+            stateCache.set(rk, { viewCount, lastViewedAt })
+
+            if (!seeded || !prev) continue
+            if (viewCount === prev.viewCount) continue
+
+            changes++
+            await syncItemToTrakt(user, rk, item, prev.viewCount)
+          }
+        }
+      }
+
+      lastPollAt = Date.now()
+
+      if (!seeded) {
+        seeded = true
+        console.log(`[watch-poll] Seeded cache with ${stateCache.size} recent items`)
+      } else if (changes > 0) {
+        console.log(`[watch-poll] Checked ${checked} recent items, ${changes} changes synced`)
+      }
+    } catch (err: any) {
+      console.warn(`[watch-poll] Poll failed for ${user.plexUsername || user.plexId}: ${err.message}`)
     }
-
-    if (changes === 0) console.log(`[watch-poll] Polled ${items.length} items, no changes`)
   }
 }
 
@@ -175,20 +209,24 @@ export async function startWatchStatePoller() {
   const serverUrl = process.env.PLEX_SERVER_URL
   if (!serverUrl) return
 
-  console.log(`✓ Watch-state poller running every 5m`)
+  if (pollInterval <= 0) {
+    console.log("[watch-poll] Poller disabled (WATCH_POLL_INTERVAL=0)")
+    return
+  }
 
-  // Seed cache immediately
+  console.log(`[watch-poll] Smart poller running every ${pollInterval / 1000}s (top-10 recent items)`)
+
   try {
-    await pollAllItems(serverUrl)
+    await pollRecentChanges(serverUrl)
   } catch (err: any) {
     console.warn(`[watch-poll] Initial poll failed: ${err.message}`)
   }
 
-  setInterval(async () => {
+  pollTimer = setInterval(async () => {
     try {
-      await pollAllItems(serverUrl)
+      await pollRecentChanges(serverUrl)
     } catch (err: any) {
       console.error(`[watch-poll] Error: ${err.message}`)
     }
-  }, POLL_INTERVAL_MS)
+  }, pollInterval)
 }

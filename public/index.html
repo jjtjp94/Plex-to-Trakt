@@ -22,535 +22,290 @@
       --text-primary:    oklch(0.92 0.005 50);
       --text-secondary:  oklch(0.65 0.005 50);
       --text-tertiary:   oklch(0.45 0.005 50);
-      --radius: 8px;
-      --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      --radius:          8px;
+      --radius-sm:       4px;
     }
 
-    html { height: 100%; }
-
+    html { background: var(--bg-root); color: var(--text-primary); }
     body {
-      font-family: var(--font);
-      background: var(--bg-root);
-      color: var(--text-primary);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
       font-size: 15px;
       line-height: 1.5;
-      min-height: 100%;
-      -webkit-font-smoothing: antialiased;
+      min-height: 100dvh;
     }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { color: var(--accent-hover); }
+    code { font-family: ui-monospace, 'SF Mono', 'Cascadia Code', monospace; font-size: 13px; }
 
-    .app {
-      max-width: 720px;
-      margin: 0 auto;
-      padding: 0 16px 48px;
-    }
-
-    /* --- Nav --- */
+    /* ── Nav ── */
     .nav {
-      position: sticky;
-      top: 0;
-      z-index: 100;
+      position: sticky; top: 0; z-index: 10;
+      display: flex; align-items: center; gap: 12px;
+      padding: 0 16px; height: 48px;
       background: var(--bg-elevated);
       border-bottom: 1px solid var(--border);
-      padding: 0 16px;
-      display: flex;
-      align-items: center;
-      height: 52px;
-      gap: 12px;
     }
-
     .nav-brand {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-weight: 600;
-      font-size: 15px;
-      color: var(--text-primary);
-      text-decoration: none;
-      margin-right: auto;
+      display: flex; align-items: center; gap: 8px;
+      font-weight: 600; font-size: 15px; color: var(--text-primary);
+      text-decoration: none; margin-right: auto;
     }
-
-    .nav-brand img {
-      width: 28px;
-      height: 28px;
-    }
-
-    .nav-dots {
-      display: flex;
-      align-items: center;
-      gap: 16px;
-    }
-
+    .nav-brand img { width: 24px; height: 24px; }
+    .nav-dots { display: flex; gap: 16px; align-items: center; }
     .status-indicator {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 13px;
-      color: var(--text-secondary);
-      cursor: default;
-      position: relative;
+      display: flex; align-items: center; gap: 6px; cursor: default;
+      font-size: 13px; color: var(--text-secondary);
     }
-
     .status-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
+      width: 8px; height: 8px; border-radius: 50%;
       background: var(--text-tertiary);
-      flex-shrink: 0;
       transition: background 0.3s, transform 0.3s;
+      flex-shrink: 0;
     }
-
     .status-dot--green { background: var(--success); }
     .status-dot--red { background: var(--error); }
     .status-dot--yellow { background: var(--warning); }
-
-    .status-dot--pulse {
-      animation: dot-pulse 2s ease-in-out infinite;
-    }
-
-    @keyframes dot-pulse {
-      0%, 100% { transform: scale(1); opacity: 1; }
-      50% { transform: scale(1.4); opacity: 0.7; }
-    }
-
-    .status-dot--reconnect {
-      animation: dot-reconnect 0.3s ease-out;
-    }
-
-    @keyframes dot-reconnect {
-      0% { transform: scale(1.6); }
-      100% { transform: scale(1); }
-    }
-
+    .status-dot--reconnect { transform: scale(1.4); }
+    .status-dot--pulse { animation: dot-pulse 2s ease-in-out; }
+    @keyframes dot-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.5); } }
     .nav-gear {
-      background: none;
-      border: none;
-      color: var(--text-secondary);
-      cursor: pointer;
-      padding: 8px;
-      border-radius: 6px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
+      background: none; border: none; color: var(--text-secondary); cursor: pointer;
+      width: 36px; height: 36px; display: flex; align-items: center; justify-content: center;
+      border-radius: var(--radius-sm); margin-left: 12px;
       transition: color 0.15s, background 0.15s;
-      margin-left: 8px;
     }
-
     .nav-gear:hover { color: var(--text-primary); background: var(--bg-surface); }
-    .nav-gear:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .nav-gear svg { width: 18px; height: 18px; }
 
-    .nav-gear svg { width: 20px; height: 20px; }
-
-    /* --- Feed --- */
-    .feed {
-      margin-top: 24px;
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
+    /* ── Main Layout ── */
+    .app {
+      max-width: 720px; margin: 0 auto;
+      padding: 24px 16px 120px;
     }
 
-    .feed-empty {
-      text-align: center;
-      padding: 64px 24px;
-      color: var(--text-tertiary);
-      font-size: 15px;
-    }
-
-    .activity-item {
+    /* ── Now Watching ── */
+    .now-watching { margin-bottom: 24px; }
+    .now-watching:empty { display: none; }
+    .nw-item {
+      padding: 16px;
       background: var(--bg-surface);
-      padding: 14px 16px;
-      display: flex;
-      gap: 12px;
-      align-items: flex-start;
-      content-visibility: auto;
-    }
-
-    .activity-item:first-child {
-      border-radius: var(--radius) var(--radius) 0 0;
-    }
-
-    .activity-item:last-child {
-      border-radius: 0 0 var(--radius) var(--radius);
-    }
-
-    .activity-item:only-child {
+      border: 1px solid var(--border);
       border-radius: var(--radius);
+      margin-bottom: 8px;
     }
-
-    .activity-item--entering {
-      animation: slide-in 200ms ease-out;
+    .nw-header {
+      display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
     }
-
-    @keyframes slide-in {
-      from { opacity: 0; transform: translateY(-8px); }
-      to { opacity: 1; transform: translateY(0); }
+    .nw-badge {
+      font-size: 11px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.05em; color: var(--accent);
     }
-
-    .activity-icon {
-      width: 36px;
-      height: 36px;
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      flex-shrink: 0;
-      font-size: 16px;
-      margin-top: 2px;
+    .nw-time { font-size: 13px; color: var(--text-tertiary); margin-left: auto; }
+    .nw-title { font-size: 15px; font-weight: 600; margin-bottom: 2px; }
+    .nw-meta { font-size: 13px; color: var(--text-secondary); margin-bottom: 10px; }
+    .nw-progress {
+      height: 3px; background: var(--border); border-radius: 2px; overflow: hidden;
     }
-
-    .activity-icon--watching { background: var(--accent-subtle); }
-    .activity-icon--watched { background: oklch(0.72 0.14 145 / 0.15); }
-    .activity-icon--synced { background: oklch(0.65 0.005 50 / 0.15); }
-    .activity-icon--error { background: oklch(0.65 0.18 25 / 0.15); }
-    .activity-icon--ws { background: oklch(0.60 0.12 260 / 0.15); }
-
-    .activity-body {
-      flex: 1;
-      min-width: 0;
-    }
-
-    .activity-header {
-      display: flex;
-      align-items: baseline;
-      gap: 8px;
-      flex-wrap: wrap;
-    }
-
-    .activity-badge {
-      font-size: 11px;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      padding: 1px 6px;
-      border-radius: 4px;
-    }
-
-    .badge--watching { color: var(--accent); background: var(--accent-subtle); }
-    .badge--watched { color: var(--success); background: oklch(0.72 0.14 145 / 0.15); }
-    .badge--synced { color: var(--text-secondary); background: oklch(0.65 0.005 50 / 0.15); }
-    .badge--error { color: var(--error); background: oklch(0.65 0.18 25 / 0.15); }
-    .badge--ws { color: oklch(0.70 0.12 260); background: oklch(0.60 0.12 260 / 0.15); }
-
-    .activity-time {
-      font-size: 13px;
-      color: var(--text-tertiary);
-      margin-left: auto;
-      white-space: nowrap;
-    }
-
-    .activity-title {
-      font-weight: 600;
-      margin-top: 2px;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-
-    .activity-meta {
-      font-size: 13px;
-      color: var(--text-secondary);
-      margin-top: 2px;
-    }
-
-    .activity-progress {
-      height: 3px;
-      background: var(--border);
-      border-radius: 2px;
-      margin-top: 8px;
-      overflow: hidden;
-    }
-
-    .activity-progress-fill {
-      height: 100%;
-      background: var(--accent);
-      border-radius: 2px;
+    .nw-progress-fill {
+      height: 100%; background: var(--accent); border-radius: 2px;
       transition: width 1s linear;
     }
 
-    .activity-check {
-      display: inline-block;
-      color: var(--success);
-      margin-left: 4px;
-      animation: check-pop 300ms ease-out;
-    }
-
-    @keyframes check-pop {
-      0% { transform: scale(0); opacity: 0; }
-      60% { transform: scale(1.2); }
-      100% { transform: scale(1); opacity: 1; }
-    }
-
-    /* --- Sync Panel --- */
-    .sync-panel {
-      margin-top: 24px;
-      background: var(--bg-surface);
-      border-radius: var(--radius);
-      padding: 16px;
-      display: flex;
-      align-items: center;
-      gap: 16px;
-      flex-wrap: wrap;
-    }
-
-    .sync-info {
-      flex: 1;
-      min-width: 200px;
-    }
-
-    .sync-info-line {
-      font-size: 13px;
-      color: var(--text-secondary);
-    }
-
-    .sync-info-line strong {
-      color: var(--text-primary);
-      font-weight: 600;
-    }
-
-    /* --- Buttons --- */
-    .btn {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 6px;
-      padding: 10px 20px;
-      border: none;
-      border-radius: 6px;
-      font-family: var(--font);
-      font-size: 14px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: background 0.15s, opacity 0.15s;
-      min-height: 44px;
-      min-width: 44px;
-    }
-
-    .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-
-    .btn--primary {
-      background: var(--accent);
-      color: oklch(0.15 0.005 50);
-    }
-    .btn--primary:hover { background: var(--accent-hover); }
-    .btn--primary:disabled { opacity: 0.5; cursor: not-allowed; }
-
-    .btn--secondary {
-      background: var(--bg-elevated);
-      color: var(--text-primary);
-    }
-    .btn--secondary:hover { background: var(--border); }
-
-    .btn--danger {
-      background: var(--error);
-      color: white;
-    }
-    .btn--danger:hover { background: oklch(0.58 0.18 25); }
-
-    .btn--ghost {
-      background: transparent;
-      color: var(--text-secondary);
-      padding: 8px 12px;
-    }
-    .btn--ghost:hover { color: var(--text-primary); background: var(--bg-elevated); }
-
-    /* --- Settings Panel --- */
-    .settings-overlay {
-      position: fixed;
-      inset: 0;
-      background: oklch(0 0 0 / 0.5);
-      z-index: 200;
-      opacity: 0;
-      visibility: hidden;
-      transition: opacity 250ms ease-out, visibility 250ms;
-    }
-
-    .settings-overlay.open {
-      opacity: 1;
-      visibility: visible;
-    }
-
-    .settings-panel {
-      position: fixed;
-      top: 0;
-      right: 0;
-      bottom: 0;
-      width: min(400px, 100vw);
-      background: var(--bg-surface);
-      z-index: 201;
-      transform: translateX(100%);
-      transition: transform 250ms ease-out;
-      overflow-y: auto;
-      display: flex;
-      flex-direction: column;
-    }
-
-    .settings-panel.open {
-      transform: translateX(0);
-    }
-
-    .settings-header {
-      padding: 16px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      border-bottom: 1px solid var(--border);
-      position: sticky;
-      top: 0;
-      background: var(--bg-surface);
-    }
-
-    .settings-header h2 {
-      font-size: 15px;
-      font-weight: 600;
-    }
-
-    .settings-close {
-      background: none;
-      border: none;
-      color: var(--text-secondary);
-      cursor: pointer;
-      padding: 8px;
-      border-radius: 6px;
-      display: flex;
-    }
-    .settings-close:hover { color: var(--text-primary); background: var(--bg-elevated); }
-
-    .settings-section {
-      padding: 16px;
-      border-bottom: 1px solid var(--border);
-    }
-
-    .settings-section h3 {
-      font-size: 13px;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      color: var(--text-secondary);
+    /* ── Activity Feed ── */
+    .section-label {
+      font-size: 11px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.08em; color: var(--text-tertiary);
       margin-bottom: 12px;
     }
+    .feed-empty {
+      text-align: center; padding: 48px 16px;
+      color: var(--text-tertiary); font-size: 15px;
+    }
+    .activity-item {
+      display: flex; gap: 12px; padding: 12px 0;
+      border-bottom: 1px solid var(--border);
+      transition: opacity 0.2s, transform 0.2s;
+    }
+    .activity-item--entering {
+      opacity: 0; transform: translateY(-8px);
+    }
+    .activity-icon {
+      width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 12px; font-weight: 700; margin-top: 2px;
+    }
+    .activity-icon--watching { background: var(--accent-subtle); color: var(--accent); }
+    .activity-icon--watched { background: oklch(0.72 0.14 145 / 0.15); color: var(--success); }
+    .activity-icon--synced { background: oklch(0.65 0.005 50 / 0.15); color: var(--text-secondary); }
+    .activity-icon--error { background: oklch(0.65 0.18 25 / 0.15); color: var(--error); }
+    .activity-icon--ws { background: oklch(0.72 0.16 70 / 0.10); color: var(--accent); }
+    .activity-body { flex: 1; min-width: 0; }
+    .activity-header { display: flex; align-items: center; gap: 8px; margin-bottom: 2px; }
+    .activity-badge {
+      font-size: 11px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .badge--watching { color: var(--accent); }
+    .badge--watched { color: var(--success); }
+    .badge--synced { color: var(--text-secondary); }
+    .badge--error { color: var(--error); }
+    .badge--ws { color: var(--accent); }
+    .activity-time { font-size: 13px; color: var(--text-tertiary); margin-left: auto; white-space: nowrap; }
+    .activity-title { font-size: 14px; color: var(--text-primary); }
+    .activity-meta { font-size: 13px; color: var(--text-secondary); }
+    .activity-check { color: var(--success); }
+    .feed-more {
+      display: block; width: 100%; padding: 12px;
+      background: none; border: 1px solid var(--border); border-radius: var(--radius);
+      color: var(--text-secondary); font-size: 13px; cursor: pointer;
+      margin-top: 8px; text-align: center;
+      transition: border-color 0.15s, color 0.15s;
+    }
+    .feed-more:hover { border-color: var(--text-secondary); color: var(--text-primary); }
 
+    /* ── Sync Panel ── */
+    .sync-panel {
+      position: fixed; bottom: 0; left: 0; right: 0;
+      background: var(--bg-elevated);
+      border-top: 1px solid var(--border);
+      padding: 12px 16px;
+      display: flex; align-items: center; gap: 12px;
+      z-index: 5;
+    }
+    .sync-info { flex: 1; min-width: 0; }
+    .sync-info-line { font-size: 13px; color: var(--text-secondary); }
+    .sync-info-line strong { color: var(--text-primary); font-weight: 600; }
+
+    /* ── Buttons ── */
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center;
+      padding: 8px 16px; border-radius: var(--radius-sm);
+      font-size: 13px; font-weight: 600; cursor: pointer;
+      border: none; transition: background 0.15s, opacity 0.15s;
+      min-height: 36px; white-space: nowrap;
+    }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn:active:not(:disabled) { transform: scale(0.98); }
+    .btn--primary { background: var(--accent); color: oklch(0.15 0.005 50); }
+    .btn--primary:hover:not(:disabled) { background: var(--accent-hover); }
+    .btn--secondary { background: var(--bg-surface); color: var(--text-primary); border: 1px solid var(--border); }
+    .btn--secondary:hover:not(:disabled) { background: var(--bg-elevated); }
+    .btn--danger { background: var(--error); color: white; }
+    .btn--ghost { background: none; color: var(--text-secondary); }
+    .btn--ghost:hover { color: var(--text-primary); }
+    .sync-status { font-size: 13px; color: var(--text-secondary); }
+
+    /* ── Settings Panel ── */
+    .settings-overlay {
+      position: fixed; inset: 0; background: oklch(0 0 0 / 0.5);
+      z-index: 20; opacity: 0; pointer-events: none;
+      transition: opacity 0.25s;
+    }
+    .settings-overlay.open { opacity: 1; pointer-events: auto; }
+    .settings-panel {
+      position: fixed; top: 0; right: 0; bottom: 0; width: 380px; max-width: 100vw;
+      background: var(--bg-surface);
+      border-left: 1px solid var(--border);
+      z-index: 21; overflow-y: auto;
+      transform: translateX(100%);
+      transition: transform 0.25s ease-out;
+    }
+    .settings-panel.open { transform: translateX(0); }
+    .settings-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 16px; border-bottom: 1px solid var(--border);
+    }
+    .settings-header h2 { font-size: 15px; font-weight: 600; }
+    .settings-close {
+      background: none; border: none; color: var(--text-secondary);
+      cursor: pointer; padding: 4px; display: flex;
+    }
+    .settings-close:hover { color: var(--text-primary); }
+    .settings-section { padding: 16px; border-bottom: 1px solid var(--border); }
+    .settings-section h3 {
+      font-size: 11px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.08em; color: var(--text-tertiary);
+      margin-bottom: 12px;
+    }
     .settings-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 6px 0;
-      font-size: 14px;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 6px 0; gap: 8px;
     }
-
-    .settings-row-label { color: var(--text-secondary); }
-    .settings-row-value { color: var(--text-primary); font-weight: 500; }
+    .settings-row-label { font-size: 13px; color: var(--text-secondary); }
+    .settings-row-value { font-size: 13px; font-weight: 500; text-align: right; }
     .settings-row-value--green { color: var(--success); }
-    .settings-row-value--red { color: var(--error); }
     .settings-row-value--yellow { color: var(--warning); }
+    .settings-row-value--red { color: var(--error); }
+    .settings-actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
 
-    .settings-actions {
-      display: flex;
-      gap: 8px;
-      margin-top: 12px;
+    /* Editable settings controls */
+    .setting-select, .setting-toggle {
+      font-size: 13px; font-family: inherit;
+      background: var(--bg-elevated); color: var(--text-primary);
+      border: 1px solid var(--border); border-radius: var(--radius-sm);
+      padding: 4px 8px; cursor: pointer;
     }
+    .setting-select:focus, .setting-toggle:focus {
+      outline: 2px solid var(--accent); outline-offset: 2px;
+    }
+    .setting-toggle {
+      width: 40px; height: 22px; padding: 0;
+      border-radius: 11px; position: relative;
+      appearance: none; -webkit-appearance: none;
+    }
+    .setting-toggle::after {
+      content: ''; position: absolute; top: 2px; left: 2px;
+      width: 16px; height: 16px; border-radius: 50%;
+      background: var(--text-secondary);
+      transition: transform 0.15s, background 0.15s;
+    }
+    .setting-toggle:checked { background: var(--accent); border-color: var(--accent); }
+    .setting-toggle:checked::after {
+      transform: translateX(18px); background: oklch(0.15 0.005 50);
+    }
+    .setting-saved {
+      font-size: 11px; color: var(--success); margin-left: 8px;
+      opacity: 0; transition: opacity 0.2s;
+    }
+    .setting-saved.show { opacity: 1; }
 
-    /* --- Setup Wizard --- */
+    /* ── Wizard ── */
     .wizard {
-      max-width: 480px;
-      margin: 80px auto 0;
+      max-width: 440px; margin: 80px auto 0;
       padding: 0 16px;
     }
-
-    .wizard-step {
-      background: var(--bg-surface);
-      border-radius: var(--radius);
-      padding: 32px 24px;
-      margin-bottom: 16px;
-    }
-
-    .wizard-step h2 {
-      font-size: 20px;
-      margin-bottom: 8px;
-    }
-
-    .wizard-step p {
-      color: var(--text-secondary);
-      margin-bottom: 16px;
-      font-size: 14px;
-    }
-
-    .wizard-step a {
-      color: var(--accent);
-      text-decoration: none;
-    }
-    .wizard-step a:hover { text-decoration: underline; }
-
-    .wizard-step code {
-      background: var(--bg-elevated);
-      padding: 4px 8px;
-      border-radius: 4px;
-      font-size: 13px;
-      color: var(--accent);
-      word-break: break-all;
-    }
-
-    .form-group {
-      margin-bottom: 16px;
-    }
-
-    .form-label {
-      display: block;
-      font-size: 13px;
-      font-weight: 600;
-      color: var(--text-secondary);
-      margin-bottom: 4px;
-    }
-
+    .wizard-step { margin-bottom: 32px; }
+    .wizard-step h2 { font-size: 20px; font-weight: 600; margin-bottom: 8px; }
+    .wizard-step p { font-size: 15px; color: var(--text-secondary); margin-bottom: 16px; line-height: 1.5; }
+    .form-group { margin-bottom: 16px; }
+    .form-label { display: block; font-size: 13px; color: var(--text-secondary); margin-bottom: 4px; }
     .form-input {
-      width: 100%;
-      padding: 10px 12px;
-      background: var(--bg-elevated);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      color: var(--text-primary);
-      font-family: var(--font);
-      font-size: 14px;
-      transition: border-color 0.15s;
+      width: 100%; padding: 10px 12px; font-size: 15px; font-family: inherit;
+      background: var(--bg-elevated); color: var(--text-primary);
+      border: 1px solid var(--border); border-radius: var(--radius-sm);
     }
-
-    .form-input:focus {
-      outline: none;
-      border-color: var(--accent);
-    }
-
-    .form-status {
-      margin-top: 12px;
-      font-size: 14px;
-    }
-
+    .form-input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+    .form-status { margin-top: 12px; font-size: 13px; }
     .form-status--ok { color: var(--success); }
     .form-status--error { color: var(--error); }
     .form-status--pending { color: var(--text-secondary); }
 
-    .wizard-complete {
-      text-align: center;
-      padding: 40px 24px;
-    }
-
-    .wizard-complete h2 {
-      color: var(--success);
-      margin-bottom: 8px;
-    }
-
-    /* --- Responsive --- */
+    /* ── Responsive ── */
     @media (max-width: 768px) {
-      .status-label { display: none; }
-      .sync-panel { flex-direction: column; align-items: stretch; }
+      .status-indicator .status-label { display: none; }
+      .settings-panel { width: 100vw; }
+      .app { padding: 16px 12px 120px; }
+      .sync-panel { flex-wrap: wrap; }
     }
 
-    /* --- Reduced Motion --- */
+    /* ── Reduced Motion ── */
     @media (prefers-reduced-motion: reduce) {
-      .activity-item--entering { animation: none; }
-      .status-dot--pulse { animation: none; }
-      .activity-check { animation: none; }
-      .settings-panel { transition: none; }
-      .settings-overlay { transition: none; }
-      .activity-progress-fill { transition: none; }
+      *, *::before, *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+      .activity-item--entering { opacity: 1; transform: none; }
     }
+
+    /* ── Focus ── */
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   </style>
 </head>
 <body>
@@ -591,52 +346,89 @@
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
     </div>
+
     <div class="settings-section">
-      <h3>Plex</h3>
+      <h3>Connections</h3>
       <div class="settings-row">
-        <span class="settings-row-label">Status</span>
+        <span class="settings-row-label">Plex</span>
         <span class="settings-row-value" id="settingsPlexStatus">--</span>
       </div>
       <div class="settings-row">
         <span class="settings-row-label">User</span>
         <span class="settings-row-value" id="settingsPlexUser">--</span>
       </div>
-    </div>
-    <div class="settings-section">
-      <h3>Trakt</h3>
       <div class="settings-row">
-        <span class="settings-row-label">Status</span>
+        <span class="settings-row-label">Trakt</span>
         <span class="settings-row-value" id="settingsTraktStatus">--</span>
       </div>
       <div class="settings-row">
         <span class="settings-row-label">Token expires</span>
         <span class="settings-row-value" id="settingsTraktExpiry">--</span>
       </div>
-      <div class="settings-actions">
-        <button class="btn btn--secondary" onclick="showTraktSettings()">Change Credentials</button>
-        <button class="btn btn--danger" onclick="removeTraktCredentials()">Disconnect</button>
-      </div>
-    </div>
-    <div class="settings-section">
-      <h3>WebSocket</h3>
       <div class="settings-row">
-        <span class="settings-row-label">Status</span>
+        <span class="settings-row-label">WebSocket</span>
         <span class="settings-row-value" id="settingsWsStatus">--</span>
       </div>
       <div class="settings-row">
-        <span class="settings-row-label">Reconnects</span>
-        <span class="settings-row-value" id="settingsWsReconnects">--</span>
+        <span class="settings-row-label">WS reconnects</span>
+        <span class="settings-row-value" id="settingsWsReconnects">0</span>
       </div>
     </div>
+
     <div class="settings-section">
-      <h3>Webhook</h3>
+      <h3>Sync</h3>
+      <div class="settings-row">
+        <span class="settings-row-label">Sync interval</span>
+        <select class="setting-select" id="settingSyncInterval" onchange="saveSetting('SYNC_INTERVAL', this.value)">
+          <option value="">Off</option>
+          <option value="3h">Every 3 hours</option>
+          <option value="6h">Every 6 hours</option>
+          <option value="12h">Every 12 hours</option>
+          <option value="24h">Every 24 hours</option>
+        </select>
+        <span class="setting-saved" id="savedSyncInterval"></span>
+      </div>
+      <div class="settings-row">
+        <span class="settings-row-label">Sync unwatched</span>
+        <input type="checkbox" class="setting-toggle" id="settingSyncUnwatched" onchange="saveSetting('SYNC_UNWATCHED', this.checked ? 'true' : 'false')" />
+        <span class="setting-saved" id="savedSyncUnwatched"></span>
+      </div>
+      <div class="settings-row">
+        <span class="settings-row-label">Watch poller (seconds)</span>
+        <select class="setting-select" id="settingWatchPoll" onchange="saveSetting('WATCH_POLL_INTERVAL', this.value)">
+          <option value="0">Off</option>
+          <option value="10">10s</option>
+          <option value="15">15s</option>
+          <option value="30">30s</option>
+          <option value="60">60s</option>
+        </select>
+        <span class="setting-saved" id="savedWatchPoll"></span>
+      </div>
+      <div class="settings-row">
+        <span class="settings-row-label">WebSocket</span>
+        <input type="checkbox" class="setting-toggle" id="settingWsEnabled" onchange="saveSetting('WS_ENABLED', this.checked ? 'true' : 'false')" />
+        <span class="setting-saved" id="savedWsEnabled"></span>
+      </div>
+      <div class="settings-row">
+        <span class="settings-row-label">Intro/credit detection</span>
+        <input type="checkbox" class="setting-toggle" id="settingIntroDetection" onchange="saveSetting('INTRO_DETECTION_ENABLED', this.checked ? 'true' : 'false')" />
+        <span class="setting-saved" id="savedIntroDetection"></span>
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <h3>Webhook URL</h3>
       <div class="settings-row" style="flex-direction:column;align-items:flex-start;gap:4px">
-        <span class="settings-row-label">Configure in Plex → Settings → Webhooks</span>
-        <code id="settingsWebhookUrl" style="background:var(--bg-elevated);padding:6px 10px;border-radius:4px;font-size:13px;color:var(--accent);word-break:break-all;">--</code>
+        <span class="settings-row-label">Add this URL in Plex Settings &rarr; Webhooks</span>
+        <code id="settingsWebhookUrl" style="background:var(--bg-elevated);padding:6px 10px;border-radius:4px;font-size:13px;color:var(--accent);word-break:break-all;width:100%">--</code>
       </div>
     </div>
+
     <div class="settings-section">
+      <h3>Account</h3>
       <div class="settings-actions">
+        <button class="btn btn--secondary" onclick="showTraktSettings()">Change Trakt Credentials</button>
+        <button class="btn btn--danger" onclick="removeTraktCredentials()">Disconnect Trakt</button>
         <button class="btn btn--ghost" onclick="logout()">Logout</button>
       </div>
     </div>
@@ -644,23 +436,27 @@
 
   <!-- Dashboard View -->
   <div class="app" id="dashboardView" style="display:none">
-    <div class="feed" id="activityFeed">
+    <div class="now-watching" id="nowWatching"></div>
+
+    <div class="section-label" id="activityLabel" style="display:none">Activity</div>
+    <div id="activityFeed">
       <div class="feed-empty" id="feedEmpty">No activity yet. Play something on Plex to see it here.</div>
     </div>
+    <button class="feed-more" id="feedMore" style="display:none" onclick="showMoreActivity()">Show more</button>
+  </div>
 
-    <div class="sync-panel" id="syncPanel">
-      <div class="sync-info">
-        <div class="sync-info-line" id="syncLastLine">Last sync: never</div>
-        <div class="sync-info-line" id="syncNextLine"></div>
-      </div>
-      <button class="btn btn--primary" id="syncNowBtn" onclick="syncNow()">Sync Now</button>
-      <span id="syncStatus" style="font-size:13px"></span>
+  <!-- Sync Panel (fixed bottom bar) -->
+  <div class="sync-panel" id="syncPanel" style="display:none">
+    <div class="sync-info">
+      <div class="sync-info-line" id="syncLastLine">Last sync: never</div>
+      <div class="sync-info-line" id="syncNextLine"></div>
     </div>
+    <button class="btn btn--primary" id="syncNowBtn" onclick="syncNow()">Sync Now</button>
+    <span class="sync-status" id="syncStatus"></span>
   </div>
 
   <!-- Setup Wizard View -->
   <div class="wizard" id="wizardView" style="display:none">
-    <!-- Step 1: Plex Login -->
     <div class="wizard-step" id="wizardStep1">
       <h2>Connect Plex</h2>
       <p>Authenticate with your Plex account to verify server access.</p>
@@ -668,7 +464,6 @@
       <div class="form-status" id="plexStatus"></div>
     </div>
 
-    <!-- Step 2: Trakt Config -->
     <div class="wizard-step" id="wizardStep2" style="display:none">
       <h2>Connect Trakt</h2>
       <p>Create a Trakt API application at <a href="https://trakt.tv/oauth/applications/new" target="_blank">trakt.tv/oauth/applications</a></p>
@@ -687,8 +482,7 @@
       <div class="form-status" id="traktStatus"></div>
     </div>
 
-    <!-- Step 3: Complete -->
-    <div class="wizard-step wizard-complete" id="wizardStep3" style="display:none">
+    <div class="wizard-step" id="wizardStep3" style="display:none">
       <h2>Ready</h2>
       <p>PlexTrakt is configured. Your watch history will sync automatically.</p>
       <p style="margin-top:16px"><button class="btn btn--primary" onclick="finishSetup()">Go to Dashboard</button></p>
@@ -704,12 +498,14 @@
       nextSyncAt: null,
       setupComplete: false,
       statusData: null,
+      feedItems: 0,
+      feedMax: 20,
     }
 
     let currentUserId = null
     let pollInterval = null
     let eventSource = null
-    let extrapolationFrame = null
+    let syncCountdown = null
 
     /* ── Init ── */
     async function init() {
@@ -731,55 +527,47 @@
 
     async function checkUserStatus() {
       const savedUserId = localStorage.getItem('plexTraktUserId')
-      if (!savedUserId) {
-        showWizard()
-        return
-      }
+      if (!savedUserId) { showWizard(); return }
 
       try {
         const res = await fetch('/auth/plex/user-status/' + savedUserId)
         const data = await res.json()
-
         if (!data.ok) {
           localStorage.removeItem('plexTraktUserId')
           showWizard()
           return
         }
-
         currentUserId = parseInt(savedUserId)
-
         if (data.hasTraktTokens) {
           showDashboard(data.username)
         } else {
           showWizard()
-          document.getElementById('plexStatus').innerHTML = '<span class="form-status--ok">Connected as ' + escapeHtml(data.username) + '</span>'
+          document.getElementById('plexStatus').innerHTML = '<span class="form-status--ok">Connected as ' + esc(data.username) + '</span>'
           document.getElementById('wizardStep2').style.display = 'block'
-          if (data.traktClientId) {
-            document.getElementById('traktClientId').value = data.traktClientId
-          }
+          if (data.traktClientId) document.getElementById('traktClientId').value = data.traktClientId
         }
-      } catch {
-        showWizard()
-      }
+      } catch { showWizard() }
     }
 
     function showWizard() {
       document.getElementById('wizardView').style.display = 'block'
       document.getElementById('dashboardView').style.display = 'none'
+      document.getElementById('syncPanel').style.display = 'none'
     }
 
     function showDashboard(username) {
       state.setupComplete = true
       document.getElementById('wizardView').style.display = 'none'
       document.getElementById('dashboardView').style.display = 'block'
+      document.getElementById('syncPanel').style.display = 'flex'
       document.getElementById('settingsPlexUser').textContent = username || '--'
       connectEventSource()
       fetchStatus()
+      loadSettings()
+      loadActivity()
     }
 
-    function finishSetup() {
-      checkUserStatus()
-    }
+    function finishSetup() { checkUserStatus() }
 
     /* ── SSE ── */
     function connectEventSource() {
@@ -788,39 +576,30 @@
       state.connected = true
 
       eventSource.onmessage = (e) => {
-        try {
-          const event = JSON.parse(e.data)
-          handleEvent(event)
-        } catch {}
+        try { handleEvent(JSON.parse(e.data)) } catch {}
       }
-
-      eventSource.onerror = () => {
-        state.connected = false
-      }
-
-      eventSource.onopen = () => {
-        state.connected = true
-      }
+      eventSource.onerror = () => { state.connected = false }
+      eventSource.onopen = () => { state.connected = true }
     }
 
     function handleEvent(event) {
       switch (event.type) {
         case 'scrobble':
           if (event.data.action === 'start') {
-            addActivityItem('watching', event)
+            upsertNowWatching(event)
           } else if (event.data.action === 'pause') {
-            updateOrAddItem('paused', event)
+            updateNowWatchingState(event.data.title, 'paused', event.data.progress)
           } else if (event.data.action === 'stop') {
-            removeActiveSession(event.data.title)
+            removeNowWatching(event.data.title)
             addActivityItem('stopped', event)
           }
           break
         case 'watched':
-          removeActiveSession(event.data.title)
+          removeNowWatching(event.data.title)
           addActivityItem('watched', event)
           break
         case 'sync_start':
-          document.getElementById('syncStatus').innerHTML = '<span style="color:var(--text-secondary)">Syncing...</span>'
+          document.getElementById('syncStatus').innerHTML = 'Syncing...'
           break
         case 'sync_complete':
           addActivityItem('synced', event)
@@ -839,92 +618,174 @@
           updateStatusDots(event.data)
           break
         case 'progress':
-          updateProgress(event.data)
+          updateNowWatchingProgress(event.data)
           break
       }
     }
 
+    /* ── Now Watching ── */
+    function upsertNowWatching(event) {
+      const d = event.data
+      const container = document.getElementById('nowWatching')
+      const key = d.title || ''
+      let el = container.querySelector('[data-nw="' + CSS.escape(key) + '"]')
+
+      state.activeSessions.set(key, {
+        progress: d.progress || 0,
+        state: 'playing',
+        updatedAt: Date.now(),
+        player: d.player,
+        user: d.user,
+      })
+
+      if (!el) {
+        el = document.createElement('div')
+        el.className = 'nw-item'
+        el.setAttribute('data-nw', key)
+        container.appendChild(el)
+      }
+
+      const pct = (d.progress || 0).toFixed(1)
+      const meta = [d.user, d.player, d.mediaType].filter(Boolean).join(' · ')
+      el.innerHTML =
+        '<div class="nw-header"><span class="nw-badge">Now Watching</span><span class="nw-time">' + fmtTime(event.timestamp) + '</span></div>' +
+        '<div class="nw-title">' + esc(d.title) + '</div>' +
+        '<div class="nw-meta">' + esc(meta) + '</div>' +
+        '<div class="nw-progress"><div class="nw-progress-fill" style="width:' + pct + '%"></div></div>'
+    }
+
+    function updateNowWatchingState(title, state, progress) {
+      const session = window.state?.activeSessions?.get(title)
+      if (session) {
+        session.state = state
+        if (progress != null) session.progress = progress
+        session.updatedAt = Date.now()
+      }
+    }
+
+    function updateNowWatchingProgress(data) {
+      const container = document.getElementById('nowWatching')
+      const fills = container.querySelectorAll('.nw-progress-fill')
+      for (const fill of fills) {
+        const pct = data.progress != null ? Math.min(100, Math.max(0, data.progress)) : 0
+        fill.style.width = pct + '%'
+      }
+    }
+
+    function removeNowWatching(title) {
+      state.activeSessions.delete(title)
+      const container = document.getElementById('nowWatching')
+      const el = container.querySelector('[data-nw="' + CSS.escape(title) + '"]')
+      if (el) el.remove()
+    }
+
     /* ── Activity Feed ── */
-    function addActivityItem(kind, event) {
+    async function loadActivity() {
+      try {
+        const res = await fetch('/api/activity?limit=50')
+        const events = await res.json()
+        for (let i = events.length - 1; i >= 0; i--) {
+          const evt = events[i]
+          const kind = eventToKind(evt)
+          if (kind) addActivityItem(kind, evt, true)
+        }
+      } catch {}
+    }
+
+    function eventToKind(evt) {
+      if (evt.type === 'scrobble') {
+        if (evt.data?.action === 'start') return 'watching'
+        if (evt.data?.action === 'pause') return 'paused'
+        if (evt.data?.action === 'stop') return 'stopped'
+        return 'watching'
+      }
+      if (evt.type === 'watched') return 'watched'
+      if (evt.type === 'sync_complete') return 'synced'
+      if (evt.type === 'sync_error') return 'error'
+      if (evt.type === 'websocket_event') return 'ws'
+      return null
+    }
+
+    function addActivityItem(kind, event, isHistorical) {
       const feed = document.getElementById('activityFeed')
       const empty = document.getElementById('feedEmpty')
       if (empty) empty.remove()
 
+      const label = document.getElementById('activityLabel')
+      if (label) label.style.display = 'block'
+
+      state.feedItems++
+      if (!isHistorical && state.feedItems > state.feedMax) {
+        document.getElementById('feedMore').style.display = 'block'
+      }
+
       const item = document.createElement('div')
-      item.className = 'activity-item activity-item--entering'
+      item.className = 'activity-item' + (isHistorical ? '' : ' activity-item--entering')
+      if (state.feedItems > state.feedMax) item.style.display = 'none'
 
       const icons = { watching: '▶', watched: '✓', synced: '⟳', error: '!', ws: '⚡', paused: '⏸', stopped: '⏹' }
-      const iconClasses = { watching: 'watching', watched: 'watched', synced: 'synced', error: 'error', ws: 'ws', paused: 'watching', stopped: 'synced' }
-      const badges = { watching: 'Watching', watched: 'Watched', synced: 'Synced', error: 'Error', ws: 'WebSocket', paused: 'Paused', stopped: 'Stopped' }
-      const badgeClasses = { watching: 'watching', watched: 'watched', synced: 'synced', error: 'error', ws: 'ws', paused: 'watching', stopped: 'synced' }
+      const iconCls = { watching: 'watching', watched: 'watched', synced: 'synced', error: 'error', ws: 'ws', paused: 'watching', stopped: 'synced' }
+      const badges = { watching: 'Watching', watched: 'Watched', synced: 'Synced', error: 'Error', ws: 'Event', paused: 'Paused', stopped: 'Stopped' }
+      const badgeCls = { watching: 'watching', watched: 'watched', synced: 'synced', error: 'error', ws: 'ws', paused: 'watching', stopped: 'synced' }
 
       const d = event.data || {}
-      let title = d.title || ''
+      let title = ''
       let meta = ''
-      let progressBar = ''
 
-      if (kind === 'watching') {
+      if (kind === 'watching' || kind === 'paused') {
+        title = d.title || ''
         meta = [d.user, d.player].filter(Boolean).join(' · ')
-        const pct = d.progress != null ? d.progress.toFixed(1) : '0'
-        progressBar = '<div class="activity-progress"><div class="activity-progress-fill" style="width:' + pct + '%" data-session="' + escapeHtml(title) + '"></div></div>'
-        state.activeSessions.set(title, { progress: d.progress || 0, state: 'playing', updatedAt: Date.now() })
+      } else if (kind === 'stopped') {
+        title = d.title || ''
+        meta = d.user || ''
       } else if (kind === 'watched') {
-        title += ' <span class="activity-check">✓</span>'
+        title = d.title || ''
         meta = d.user || ''
       } else if (kind === 'synced') {
+        const tp = d.toTrakt || 0
+        const fp = d.toPlex || 0
         title = 'Full sync complete'
-        const dur = d.duration ? (d.duration / 1000).toFixed(1) + 's' : ''
-        meta = dur
+        const parts = []
+        if (tp) parts.push(tp + ' → Trakt')
+        if (fp) parts.push(fp + ' → Plex')
+        const dur = d.duration ? ' in ' + (d.duration / 1000).toFixed(1) + 's' : ''
+        meta = (parts.join(', ') || 'No changes') + dur
       } else if (kind === 'error') {
         title = d.message || 'Sync error'
       } else if (kind === 'ws') {
-        const subtypes = { library_scan: 'Library scan detected', mark_watched: 'Marked watched', mark_unwatched: 'Marked unwatched' }
-        title = d.title || subtypes[d.subtype] || d.subtype || 'WebSocket event'
-        meta = subtypes[d.subtype] || ''
+        const subs = { library_scan: 'Library scan detected', mark_watched: 'Marked watched', mark_unwatched: 'Marked unwatched', intro_detection: 'Intro/credit detection triggered' }
+        title = d.title || subs[d.subtype] || d.subtype || 'Event'
+        meta = subs[d.subtype] || ''
       }
 
       item.innerHTML =
-        '<div class="activity-icon activity-icon--' + iconClasses[kind] + '">' + icons[kind] + '</div>' +
+        '<div class="activity-icon activity-icon--' + iconCls[kind] + '">' + icons[kind] + '</div>' +
         '<div class="activity-body">' +
           '<div class="activity-header">' +
-            '<span class="activity-badge badge--' + badgeClasses[kind] + '">' + badges[kind] + '</span>' +
-            '<span class="activity-time">' + formatTime(event.timestamp) + '</span>' +
+            '<span class="activity-badge badge--' + badgeCls[kind] + '">' + badges[kind] + '</span>' +
+            '<span class="activity-time">' + fmtTime(event.timestamp) + '</span>' +
           '</div>' +
-          '<div class="activity-title">' + title + '</div>' +
-          (meta ? '<div class="activity-meta">' + escapeHtml(meta) + '</div>' : '') +
-          progressBar +
+          '<div class="activity-title">' + esc(title) + (kind === 'watched' ? ' <span class="activity-check">✓</span>' : '') + '</div>' +
+          (meta ? '<div class="activity-meta">' + esc(meta) + '</div>' : '') +
         '</div>'
 
       feed.insertBefore(item, feed.firstChild)
 
-      // Cap feed at 100 items
-      while (feed.children.length > 100) feed.removeChild(feed.lastChild)
-
-      // Remove entering class after animation
-      setTimeout(() => item.classList.remove('activity-item--entering'), 200)
-    }
-
-    function updateOrAddItem(kind, event) {
-      const session = state.activeSessions.get(event.data.title)
-      if (session) {
-        session.state = kind === 'paused' ? 'paused' : 'playing'
-        session.progress = event.data.progress || session.progress
-        session.updatedAt = Date.now()
+      if (!isHistorical) {
+        setTimeout(() => item.classList.remove('activity-item--entering'), 200)
       }
-      addActivityItem(kind, event)
     }
 
-    function removeActiveSession(title) {
-      state.activeSessions.delete(title)
-    }
-
-    function updateProgress(data) {
-      const fills = document.querySelectorAll('.activity-progress-fill')
-      for (const fill of fills) {
-        if (fill.dataset.session === data.ratingKey || fill.dataset.session === data.sessionKey) {
-          const pct = data.progress != null ? Math.min(100, Math.max(0, data.progress)) : 0
-          fill.style.width = pct + '%'
-        }
+    function showMoreActivity() {
+      const feed = document.getElementById('activityFeed')
+      const hidden = feed.querySelectorAll('.activity-item[style*="display: none"]')
+      let shown = 0
+      for (const el of hidden) {
+        el.style.display = ''
+        if (++shown >= 20) break
+      }
+      if (feed.querySelectorAll('.activity-item[style*="display: none"]').length === 0) {
+        document.getElementById('feedMore').style.display = 'none'
       }
     }
 
@@ -956,54 +817,112 @@
         setDot('dotTrakt', data.trakt.connected ? 'green' : 'red')
         setDot('dotWs', data.websocket.connected ? 'green' : data.websocket.state === 'reconnecting' ? 'yellow' : 'red')
 
-        // Settings panel
-        const plexSt = document.getElementById('settingsPlexStatus')
-        plexSt.textContent = data.plex.connected ? 'Connected' : 'Disconnected'
-        plexSt.className = 'settings-row-value settings-row-value--' + (data.plex.connected ? 'green' : 'red')
+        // Settings panel — connections
+        const ps = document.getElementById('settingsPlexStatus')
+        ps.textContent = data.plex.connected ? 'Connected' : 'Disconnected'
+        ps.className = 'settings-row-value settings-row-value--' + (data.plex.connected ? 'green' : 'red')
 
-        const traktSt = document.getElementById('settingsTraktStatus')
-        traktSt.textContent = data.trakt.connected ? 'Connected' : 'Not connected'
-        traktSt.className = 'settings-row-value settings-row-value--' + (data.trakt.connected ? 'green' : 'red')
+        const ts = document.getElementById('settingsTraktStatus')
+        ts.textContent = data.trakt.connected ? 'Connected' : 'Not connected'
+        ts.className = 'settings-row-value settings-row-value--' + (data.trakt.connected ? 'green' : 'red')
 
-        const traktExp = document.getElementById('settingsTraktExpiry')
+        const te = document.getElementById('settingsTraktExpiry')
         if (data.trakt.tokenExpiresAt) {
           const exp = new Date(data.trakt.tokenExpiresAt)
           const days = Math.ceil((exp - Date.now()) / (1000 * 60 * 60 * 24))
-          traktExp.textContent = days > 0 ? 'in ' + days + ' days' : 'expired'
-          traktExp.className = 'settings-row-value settings-row-value--' + (days > 7 ? 'green' : days > 0 ? 'yellow' : 'red')
+          te.textContent = days > 0 ? 'in ' + days + ' days' : 'expired'
+          te.className = 'settings-row-value settings-row-value--' + (days > 7 ? 'green' : days > 0 ? 'yellow' : 'red')
         }
 
-        const wsSt = document.getElementById('settingsWsStatus')
-        wsSt.textContent = data.websocket.connected ? 'Connected' : data.websocket.state
-        wsSt.className = 'settings-row-value settings-row-value--' + (data.websocket.connected ? 'green' : 'yellow')
-
+        const ws = document.getElementById('settingsWsStatus')
+        ws.textContent = data.websocket.connected ? 'Connected' : data.websocket.state
+        ws.className = 'settings-row-value settings-row-value--' + (data.websocket.connected ? 'green' : 'yellow')
         document.getElementById('settingsWsReconnects').textContent = data.websocket.reconnectCount
 
-        if (data.sync.lastResult) {
-          state.lastSyncAt = data.sync.lastResult.timestamp || null
-        }
+        // Sync panel
+        if (data.sync.lastSyncAt) state.lastSyncAt = data.sync.lastSyncAt
+        if (data.sync.nextSyncAt) state.nextSyncAt = data.sync.nextSyncAt
         updateSyncPanel()
 
       } catch {}
 
-      // Refresh every 60s
       setTimeout(fetchStatus, 60000)
+    }
+
+    /* ── Settings Load/Save ── */
+    async function loadSettings() {
+      try {
+        const res = await fetch('/api/settings')
+        const s = await res.json()
+
+        document.getElementById('settingSyncInterval').value = s.SYNC_INTERVAL || ''
+        document.getElementById('settingSyncUnwatched').checked = s.SYNC_UNWATCHED === 'true'
+        document.getElementById('settingWatchPoll').value = s.WATCH_POLL_INTERVAL || '0'
+        document.getElementById('settingWsEnabled').checked = s.WS_ENABLED !== 'false'
+        document.getElementById('settingIntroDetection').checked = s.INTRO_DETECTION_ENABLED === 'true'
+      } catch {}
+    }
+
+    async function saveSetting(key, value) {
+      try {
+        const res = await fetch('/api/settings', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ [key]: value }),
+        })
+        const data = await res.json()
+        if (data.applied && data.applied.includes(key)) {
+          flashSaved(key)
+        }
+      } catch {}
+    }
+
+    function flashSaved(key) {
+      const map = {
+        SYNC_INTERVAL: 'savedSyncInterval',
+        SYNC_UNWATCHED: 'savedSyncUnwatched',
+        WATCH_POLL_INTERVAL: 'savedWatchPoll',
+        WS_ENABLED: 'savedWsEnabled',
+        INTRO_DETECTION_ENABLED: 'savedIntroDetection',
+      }
+      const el = document.getElementById(map[key])
+      if (!el) return
+      el.textContent = 'Saved'
+      el.classList.add('show')
+      setTimeout(() => el.classList.remove('show'), 2000)
     }
 
     /* ── Sync Panel ── */
     function updateSyncPanel() {
       const lastLine = document.getElementById('syncLastLine')
+      const nextLine = document.getElementById('syncNextLine')
+
       if (state.lastSyncAt) {
-        lastLine.innerHTML = 'Last sync: <strong>' + formatTime(state.lastSyncAt) + '</strong>'
+        lastLine.innerHTML = 'Last sync: <strong>' + fmtTime(state.lastSyncAt) + '</strong>'
+      }
+
+      if (state.nextSyncAt) {
+        const remaining = state.nextSyncAt - Date.now()
+        if (remaining > 0) {
+          const mins = Math.ceil(remaining / 60000)
+          const h = Math.floor(mins / 60)
+          const m = mins % 60
+          nextLine.textContent = 'Next: ' + (h > 0 ? h + 'h ' : '') + m + 'm'
+        } else {
+          nextLine.textContent = 'Next sync soon'
+        }
       }
     }
+
+    // Update sync countdown every 30s
+    setInterval(updateSyncPanel, 30000)
 
     /* ── Sync Now ── */
     async function syncNow() {
       const btn = document.getElementById('syncNowBtn')
       const status = document.getElementById('syncStatus')
       btn.disabled = true
-      status.innerHTML = '<span style="color:var(--text-secondary)">Syncing...</span>'
+      status.textContent = 'Syncing...'
 
       try {
         const res = await fetch('/api/sync', { method: 'POST' })
@@ -1012,10 +931,10 @@
           status.innerHTML = '<span style="color:var(--success)">Done</span>'
           setTimeout(() => { status.textContent = '' }, 3000)
         } else {
-          status.innerHTML = '<span style="color:var(--error)">' + escapeHtml(data.error) + '</span>'
+          status.innerHTML = '<span style="color:var(--error)">' + esc(data.error) + '</span>'
         }
       } catch (err) {
-        status.innerHTML = '<span style="color:var(--error)">' + escapeHtml(err.message) + '</span>'
+        status.innerHTML = '<span style="color:var(--error)">' + esc(err.message) + '</span>'
       }
 
       let cooldown = 10
@@ -1046,14 +965,14 @@
             const data = await checkRes.json()
             if (data.error) {
               clearInterval(pollInterval)
-              document.getElementById('plexStatus').innerHTML = '<span class="form-status--error">' + escapeHtml(data.error) + '</span>'
+              document.getElementById('plexStatus').innerHTML = '<span class="form-status--error">' + esc(data.error) + '</span>'
               return
             }
             if (data.authorized) {
               clearInterval(pollInterval)
               currentUserId = data.userId
               localStorage.setItem('plexTraktUserId', data.userId)
-              document.getElementById('plexStatus').innerHTML = '<span class="form-status--ok">Connected as ' + escapeHtml(data.username) + '</span>'
+              document.getElementById('plexStatus').innerHTML = '<span class="form-status--ok">Connected as ' + esc(data.username) + '</span>'
               document.getElementById('wizardStep2').style.display = 'block'
               if (popup && !popup.closed) popup.close()
             }
@@ -1067,7 +986,7 @@
           }
         }, 300000)
       } catch (err) {
-        document.getElementById('plexStatus').innerHTML = '<span class="form-status--error">' + escapeHtml(err.message) + '</span>'
+        document.getElementById('plexStatus').innerHTML = '<span class="form-status--error">' + esc(err.message) + '</span>'
       }
     }
 
@@ -1101,20 +1020,20 @@
               })
               const data = await tokenRes.json()
               if (data.error) {
-                document.getElementById('traktStatus').innerHTML = '<span class="form-status--error">' + escapeHtml(data.error) + '</span>'
+                document.getElementById('traktStatus').innerHTML = '<span class="form-status--error">' + esc(data.error) + '</span>'
                 return
               }
               document.getElementById('wizardStep2').style.display = 'none'
               document.getElementById('wizardStep3').style.display = 'block'
             } catch (err) {
-              document.getElementById('traktStatus').innerHTML = '<span class="form-status--error">' + escapeHtml(err.message) + '</span>'
+              document.getElementById('traktStatus').innerHTML = '<span class="form-status--error">' + esc(err.message) + '</span>'
             }
           }
         }
         window.addEventListener('message', handler)
         setTimeout(() => { window.removeEventListener('message', handler) }, 300000)
       } catch (err) {
-        document.getElementById('traktStatus').innerHTML = '<span class="form-status--error">' + escapeHtml(err.message) + '</span>'
+        document.getElementById('traktStatus').innerHTML = '<span class="form-status--error">' + esc(err.message) + '</span>'
       }
     }
 
@@ -1122,6 +1041,7 @@
     function showTraktSettings() {
       closeSettings()
       document.getElementById('dashboardView').style.display = 'none'
+      document.getElementById('syncPanel').style.display = 'none'
       document.getElementById('wizardView').style.display = 'block'
       document.getElementById('wizardStep1').style.display = 'none'
       document.getElementById('wizardStep2').style.display = 'block'
@@ -1169,7 +1089,7 @@
     document.getElementById('settingsOverlay').addEventListener('click', closeSettings)
 
     /* ── Helpers ── */
-    function formatTime(ts) {
+    function fmtTime(ts) {
       if (!ts) return ''
       const diff = Math.floor((Date.now() - ts) / 1000)
       if (diff < 5) return 'just now'
@@ -1179,7 +1099,7 @@
       return Math.floor(diff / 86400) + 'd ago'
     }
 
-    function escapeHtml(s) {
+    function esc(s) {
       if (!s) return ''
       return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
     }

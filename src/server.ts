@@ -45,6 +45,7 @@ const { default: authPlexRouter } = await import("./routes/authPlex.js")
 const { default: authTraktRouter } = await import("./routes/authTrakt.js")
 const { default: eventsRouter } = await import("./routes/events.js")
 const { default: statusRouter } = await import("./routes/status.js")
+const { default: settingsRouter } = await import("./routes/settings.js")
 const { startTokenRefreshCron } = await import("./services/tokenRefreshCron.js")
 const { startSyncScheduler } = await import("./services/syncScheduler.js")
 const { startWatchStatePoller } = await import("./services/watchStatePoller.js")
@@ -78,6 +79,7 @@ app.use("/auth/plex", authPlexRouter)
 app.use("/auth/trakt", authTraktRouter)
 app.use("/api/events", eventsRouter)
 app.use("/api", statusRouter)
+app.use("/api/settings", settingsRouter)
 
 // API endpoint for frontend configuration
 app.get("/api/config", (req, res) => {

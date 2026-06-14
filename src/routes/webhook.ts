@@ -14,6 +14,7 @@ import {
   extrapolatedProgress,
 } from "../services/sessionTracker.js"
 import { emit } from "../services/eventBus.js"
+import { handleEpisodePlay } from "../services/introDetection.js"
 
 const PLAYBACK_EVENTS = ["media.play", "media.resume", "media.pause", "media.stop", "media.scrobble"]
 const SUPPORTED_TYPES = ["movie", "episode"]
@@ -112,6 +113,12 @@ router.post("/plex", upload.single("thumb"), async (req, res) => {
           return res.status(200).send("deduped")
         }
         await sendScrobble("start", user, md.type, ids, progress)
+
+        if (event === "media.play" && md.type === "episode" && md.ratingKey) {
+          handleEpisodePlay(String(md.ratingKey)).catch((err) =>
+            console.error("[intro] Background detection error:", err.message)
+          )
+        }
         const session = upsertSession({
           prismaUserId: user.id,
           plexAccountId: String(Account.id),

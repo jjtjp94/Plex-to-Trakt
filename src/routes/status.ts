@@ -2,13 +2,15 @@ import express from "express"
 import { prisma } from "../services/prisma.js"
 import { getWebSocketState } from "../services/plexWebSocket.js"
 import { getHistory } from "../services/eventBus.js"
+import { getActiveSessionCount } from "../services/sessionTracker.js"
+import { getSyncSchedulerState } from "../services/syncScheduler.js"
+import { getPollerState } from "../services/watchStatePoller.js"
 
 const router = express.Router()
 
-// GET /api/status — system health overview
-router.get("/", async (_req, res) => {
+router.get("/status", async (_req, res) => {
   let plexConnected = false
-  let plexServerUrl = process.env.PLEX_SERVER_URL || null
+  const plexServerUrl = process.env.PLEX_SERVER_URL || null
 
   if (plexServerUrl) {
     try {
@@ -31,8 +33,9 @@ router.get("/", async (_req, res) => {
 
   const traktUser = users[0]
   const wsState = getWebSocketState()
+  const syncState = getSyncSchedulerState()
+  const pollerState = getPollerState()
 
-  const syncInterval = process.env.SYNC_INTERVAL || null
   const lastSyncEvent = getHistory()
     .filter((e) => e.type === "sync_complete" || e.type === "sync_error")
     .pop()
@@ -52,16 +55,32 @@ router.get("/", async (_req, res) => {
       state: wsState.state,
       reconnectCount: wsState.reconnectCount,
       lastMessage: wsState.lastMessageAt ? new Date(wsState.lastMessageAt).toISOString() : null,
+      lastMessageAge: wsState.lastMessageAt ? Date.now() - wsState.lastMessageAt : null,
     },
     sync: {
+      enabled: syncState.enabled,
+      interval: syncState.interval,
+      lastSyncAt: syncState.lastSyncAt || null,
+      nextSyncAt: syncState.nextSyncAt || null,
       lastResult: lastSyncEvent?.data || null,
-      interval: syncInterval,
     },
-    activeSessions: 0,
+    poller: {
+      enabled: pollerState.enabled,
+      intervalMs: pollerState.intervalMs,
+      lastPollAt: pollerState.lastPollAt || null,
+      seeded: pollerState.seeded,
+    },
+    activeSessions: getActiveSessionCount(),
+    settings: {
+      syncInterval: process.env.SYNC_INTERVAL || null,
+      syncUnwatched: process.env.SYNC_UNWATCHED === "true",
+      watchPollInterval: process.env.WATCH_POLL_INTERVAL || null,
+      wsEnabled: process.env.WS_ENABLED !== "false",
+      introDetection: process.env.INTRO_DETECTION_ENABLED === "true",
+    },
   })
 })
 
-// GET /api/activity — ring buffer contents
 router.get("/activity", (_req, res) => {
   const limit = parseInt(String(_req.query.limit) || "50", 10)
   const events = getHistory().reverse().slice(0, limit)
