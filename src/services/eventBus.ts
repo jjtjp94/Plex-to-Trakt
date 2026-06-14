@@ -16,13 +16,13 @@ export interface AppEvent {
 
 type Listener = (event: AppEvent) => void
 
-const BUFFER_SIZE = parseInt(process.env.ACTIVITY_BUFFER_SIZE || "100", 10)
 const history: AppEvent[] = []
 const listeners = new Set<Listener>()
 
 export function emit(event: AppEvent): void {
+  const bufferSize = parseInt(process.env.ACTIVITY_BUFFER_SIZE || "100", 10)
   history.push(event)
-  if (history.length > BUFFER_SIZE) history.shift()
+  if (history.length > bufferSize) history.shift()
   for (const listener of listeners) {
     try {
       listener(event)

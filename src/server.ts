@@ -45,7 +45,7 @@ const { default: authPlexRouter } = await import("./routes/authPlex.js")
 const { default: authTraktRouter } = await import("./routes/authTrakt.js")
 const { default: eventsRouter } = await import("./routes/events.js")
 const { default: statusRouter } = await import("./routes/status.js")
-const { default: settingsRouter } = await import("./routes/settings.js")
+const { default: settingsRouter, loadSettingsFromDb } = await import("./routes/settings.js")
 const { startTokenRefreshCron } = await import("./services/tokenRefreshCron.js")
 const { startSyncScheduler } = await import("./services/syncScheduler.js")
 const { startWatchStatePoller } = await import("./services/watchStatePoller.js")
@@ -114,6 +114,7 @@ app.get("/", (req: any, res: any) => res.sendFile(path.resolve("public/index.htm
 
 app.listen(PORT, async () => {
   console.log(`Server listening on ${PORT}`)
+  await loadSettingsFromDb()
   startTokenRefreshCron()
   startSyncScheduler()
   await startWatchStatePoller()

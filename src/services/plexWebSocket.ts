@@ -9,6 +9,7 @@ import {
   type PlexItem,
 } from "./plexApi.js"
 import axios from "axios"
+import { traktHeaders, idKeys, episodeKeys } from "./traktUtils.js"
 
 const TRAKT_API = process.env.TRAKT_API_URL || "https://api.trakt.tv"
 const RECONNECT_BASE_MS = 1000
@@ -20,7 +21,7 @@ let reconnectDelay = RECONNECT_BASE_MS
 let reconnectCount = 0
 let heartbeatTimer: NodeJS.Timeout | null = null
 let lastMessageAt = 0
-let connectionState: "connected" | "reconnecting" | "disconnected" = "disconnected"
+let connectionState: "connected" | "reconnecting" | "disconnected" | "disabled" | "failed" = "disconnected"
 let consecutive404s = 0
 const MAX_404_RETRIES = 3
 
@@ -34,31 +35,6 @@ function emitStatus() {
     data: { websocket: connectionState },
     timestamp: Date.now(),
   })
-}
-
-function traktHeaders(user: any) {
-  return {
-    "Content-Type": "application/json",
-    "trakt-api-version": "2",
-    "trakt-api-key": user.traktClientId,
-    Authorization: `Bearer ${user.traktAccessToken}`,
-  }
-}
-
-function idKeys(ids: Record<string, any>): string[] {
-  const keys: string[] = []
-  if (ids.imdb) keys.push(`imdb:${ids.imdb}`)
-  if (ids.tmdb) keys.push(`tmdb:${ids.tmdb}`)
-  if (ids.tvdb) keys.push(`tvdb:${ids.tvdb}`)
-  return keys
-}
-
-function episodeKeys(showIds: Record<string, any>, season: number, episode: number): string[] {
-  const keys: string[] = []
-  if (showIds.imdb) keys.push(`imdb:${showIds.imdb}:s${season}e${episode}`)
-  if (showIds.tmdb) keys.push(`tmdb:${showIds.tmdb}:s${season}e${episode}`)
-  if (showIds.tvdb) keys.push(`tvdb:${showIds.tvdb}:s${season}e${episode}`)
-  return keys
 }
 
 async function getToken(): Promise<string | undefined> {
@@ -233,7 +209,10 @@ export async function syncLibrarySection(sectionKey: string) {
 }
 
 function connect(serverUrl: string, token: string) {
-  const url = `${serverUrl.replace(/^http/, "ws").replace(/\/$/, "")}/:/websocket/notifications`
+  const wsBase = process.env.PLEX_WS_URL
+    ? process.env.PLEX_WS_URL.replace(/\/$/, "")
+    : serverUrl.replace(/^http/, "ws").replace(/\/$/, "")
+  const url = `${wsBase}/:/websocket/notifications`
   const fullUrl = `${url}?X-Plex-Token=${token}`
 
   ws = new WebSocket(fullUrl)
@@ -250,14 +229,15 @@ function connect(serverUrl: string, token: string) {
   ws.on("unexpected-response", (_req, res) => {
     if (res.statusCode === 404) {
       consecutive404s++
+      reconnectCount++
       if (consecutive404s >= MAX_404_RETRIES) {
-        console.error("[ws] Plex WebSocket endpoint returned 404 repeatedly — stopping reconnection. Check that PLEX_SERVER_URL points directly to Plex (not a reverse proxy) and that the server supports WebSocket notifications.")
-        connectionState = "disconnected"
+        console.error("[ws] Plex WebSocket endpoint returned 404 repeatedly — stopping reconnection. Check that PLEX_SERVER_URL points directly to Plex (not a reverse proxy) or set PLEX_WS_URL to the direct Plex IP/hostname.")
+        connectionState = "failed"
         emitStatus()
         ws?.close()
         return
       }
-      console.warn(`[ws] Plex returned 404 (attempt ${consecutive404s}/${MAX_404_RETRIES}). If this persists, the WebSocket endpoint may not be available at this URL.`)
+      console.warn(`[ws] Plex returned 404 (attempt ${consecutive404s}/${MAX_404_RETRIES}). If using a reverse proxy, set PLEX_WS_URL to the direct Plex address.`)
     }
   })
 
@@ -330,7 +310,8 @@ function stopHeartbeat() {
 export async function startPlexWebSocket() {
   if (process.env.WS_ENABLED === "false") {
     console.log("[ws] WebSocket disabled (WS_ENABLED=false)")
-    connectionState = "disconnected"
+    connectionState = "disabled"
+    emitStatus()
     return
   }
 

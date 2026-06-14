@@ -1,6 +1,5 @@
 import express from "express"
-import { readFileSync, writeFileSync, existsSync } from "fs"
-import path from "path"
+import { prisma } from "../services/prisma.js"
 import { restartPoller } from "../services/watchStatePoller.js"
 import { restartSyncScheduler } from "../services/syncScheduler.js"
 
@@ -47,43 +46,18 @@ const VALIDATORS: Record<EditableKey, (v: string) => string | null> = {
   },
 }
 
-function getEnvFilePath(): string {
-  return path.resolve(process.cwd(), ".env")
-}
+router.get("/", async (_req, res) => {
+  const dbSettings = await prisma.setting.findMany()
+  const dbMap = new Map(dbSettings.map((s) => [s.key, s.value]))
 
-function updateEnvFile(key: string, value: string) {
-  const envPath = getEnvFilePath()
-  if (!existsSync(envPath)) return
-
-  const content = readFileSync(envPath, "utf-8")
-  const lines = content.split("\n")
-  const regex = new RegExp(`^${key}=`)
-  let found = false
-
-  const updated = lines.map((line) => {
-    if (regex.test(line)) {
-      found = true
-      return `${key}=${value}`
-    }
-    return line
-  })
-
-  if (!found) {
-    updated.push(`${key}=${value}`)
-  }
-
-  writeFileSync(envPath, updated.join("\n"), "utf-8")
-}
-
-router.get("/", (_req, res) => {
   const settings: Record<string, string> = {}
   for (const key of EDITABLE_KEYS) {
-    settings[key] = process.env[key] || ""
+    settings[key] = dbMap.get(key) ?? process.env[key] ?? ""
   }
   res.json(settings)
 })
 
-router.patch("/", (req, res) => {
+router.patch("/", async (req, res) => {
   const updates = req.body as Record<string, string>
   if (!updates || typeof updates !== "object") {
     return res.status(400).json({ error: "Body must be a JSON object" })
@@ -106,7 +80,11 @@ router.patch("/", (req, res) => {
     }
 
     process.env[key] = strVal
-    updateEnvFile(key, strVal)
+    await prisma.setting.upsert({
+      where: { key },
+      update: { value: strVal },
+      create: { key, value: strVal },
+    })
     applied.push(key)
   }
 
@@ -114,7 +92,6 @@ router.patch("/", (req, res) => {
     return res.status(400).json({ errors })
   }
 
-  // Hot-reload affected services
   if (applied.includes("WATCH_POLL_INTERVAL")) {
     restartPoller()
   }
@@ -126,3 +103,19 @@ router.patch("/", (req, res) => {
 })
 
 export default router
+
+export async function loadSettingsFromDb() {
+  try {
+    const settings = await prisma.setting.findMany()
+    for (const s of settings) {
+      if (EDITABLE_KEYS.includes(s.key as EditableKey)) {
+        process.env[s.key] = s.value
+      }
+    }
+    if (settings.length > 0) {
+      console.log(`[settings] Loaded ${settings.length} setting(s) from database`)
+    }
+  } catch {
+    // DB may not be migrated yet on first run
+  }
+}

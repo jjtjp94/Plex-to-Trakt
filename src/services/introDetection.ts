@@ -101,9 +101,15 @@ async function withPrefEnabled(
 
   try {
     await fn()
+    // Give Plex time to read the pref before restoring it
+    await new Promise((r) => setTimeout(r, 3000))
   } finally {
     if (needsToggle) {
-      await setPlexPref(serverUrl, token, prefKey, "never")
+      try {
+        await setPlexPref(serverUrl, token, prefKey, "never")
+      } catch (err: any) {
+        console.error(`[intro] Failed to restore pref "${prefKey}" to "never": ${err.message}`)
+      }
     }
   }
 }
@@ -156,9 +162,7 @@ async function doDetection(serverUrl: string, token: string, ratingKey: string):
     }
 
     if (needsIntro) {
-      await withPrefEnabled(serverUrl, token, "GenerateIntroMarkerBehavior", async () => {
-        await triggerDetection(serverUrl, token, nextRatingKey, "intro")
-      })
+      await triggerDetection(serverUrl, token, nextRatingKey, "intro")
       detectedSeasons.add(`intro:${seasonKey}`)
       console.log(`[intro] Intro detection triggered for S${meta.parentIndex}E${meta.index + 1} (will scan full season)`)
     }

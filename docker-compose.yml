@@ -28,3 +28,12 @@ services:
       - SYNC_UNWATCHED=${SYNC_UNWATCHED:-false}
       # Watch-state quick poller interval in seconds (e.g., 60)
       - WATCH_POLL_INTERVAL=${WATCH_POLL_INTERVAL:-}
+      # WebSocket listener for instant sync (true/false, default: true)
+      - WS_ENABLED=${WS_ENABLED:-true}
+      # Direct WebSocket URL (use when PLEX_SERVER_URL is behind a reverse proxy)
+      # Example: ws://192.168.1.100:32400
+      - PLEX_WS_URL=${PLEX_WS_URL:-}
+      # Intro/credit detection for next episode (true/false, default: false)
+      - INTRO_DETECTION_ENABLED=${INTRO_DETECTION_ENABLED:-false}
+      # Activity feed buffer size (default: 100)
+      - ACTIVITY_BUFFER_SIZE=${ACTIVITY_BUFFER_SIZE:-100}

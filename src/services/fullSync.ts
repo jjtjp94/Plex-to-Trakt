@@ -3,35 +3,10 @@ import { prisma } from "./prisma.js"
 import { refreshTraktToken } from "./tokenRefresh.js"
 import { getLibrarySections, getLibraryItems, markPlexWatched, markPlexUnwatched, setPlexViewOffset, type PlexItem } from "./plexApi.js"
 import { emit } from "./eventBus.js"
+import { traktHeaders, idKeys, episodeKeys } from "./traktUtils.js"
 
 const TRAKT_API = process.env.TRAKT_API_URL || "https://api.trakt.tv"
 const PLEX_MARK_DELAY_MS = 100
-const SYNC_UNWATCHED = process.env.SYNC_UNWATCHED === "true"
-
-function traktHeaders(user: any) {
-  return {
-    "Content-Type": "application/json",
-    "trakt-api-version": "2",
-    "trakt-api-key": user.traktClientId,
-    Authorization: `Bearer ${user.traktAccessToken}`,
-  }
-}
-
-function idKeys(ids: Record<string, any>): string[] {
-  const keys: string[] = []
-  if (ids.imdb) keys.push(`imdb:${ids.imdb}`)
-  if (ids.tmdb) keys.push(`tmdb:${ids.tmdb}`)
-  if (ids.tvdb) keys.push(`tvdb:${ids.tvdb}`)
-  return keys
-}
-
-function episodeKeys(showIds: Record<string, any>, season: number, episode: number): string[] {
-  const keys: string[] = []
-  if (showIds.imdb) keys.push(`imdb:${showIds.imdb}:s${season}e${episode}`)
-  if (showIds.tmdb) keys.push(`tmdb:${showIds.tmdb}:s${season}e${episode}`)
-  if (showIds.tvdb) keys.push(`tvdb:${showIds.tvdb}:s${season}e${episode}`)
-  return keys
-}
 
 async function syncMovies(user: any, plexMovies: PlexItem[], serverUrl: string) {
   const traktRes = await axios.get(`${TRAKT_API}/sync/watched/movies`, {
@@ -115,7 +90,7 @@ async function syncMovies(user: any, plexMovies: PlexItem[], serverUrl: string) 
 
   // Unwatched sync (opt-in): unwatched in Plex -> remove from Trakt
   let removedFromTrakt = 0
-  if (SYNC_UNWATCHED) {
+  if (process.env.SYNC_UNWATCHED === "true") {
     const toRemove = plexMovies.filter(
       (m) => m.viewCount <= 0 && !justMarkedWatchedInPlex.has(m.ratingKey) && idKeys(m.ids).length > 0 && idKeys(m.ids).some((k) => traktKeys.has(k))
     )
@@ -312,7 +287,7 @@ async function syncEpisodes(user: any, plexShows: PlexItem[], plexEpisodes: Plex
   }
 
   // Unwatched sync for episodes (opt-in)
-  if (SYNC_UNWATCHED) {
+  if (process.env.SYNC_UNWATCHED === "true") {
     // Unwatched in Plex -> remove from Trakt
     const toRemove: PlexItem[] = []
     for (const ep of plexEpisodes) {
@@ -500,34 +475,8 @@ async function syncWatchlist(user: any, allPlexItems: PlexItem[], serverUrl: str
     axios.get(`${TRAKT_API}/sync/watchlist/shows`, { headers: hdrs, timeout: 30_000 }).then((r) => r.data || []).catch(() => []),
   ])
 
-  if (movieWl.length === 0 && showWl.length === 0) {
-    console.log("[sync]   Watchlist: empty on Trakt")
-    return
-  }
-
   console.log(`[sync]   Watchlist: ${movieWl.length} movies, ${showWl.length} shows on Trakt`)
 
-  const plexByIdKey = new Map<string, PlexItem>()
-  for (const item of allPlexItems) {
-    for (const k of idKeys(item.ids)) plexByIdKey.set(k, item)
-  }
-
-  // Trakt -> Plex: mark watchlist items that are unwatched in Plex
-  // We don't create playlists (requires Plex Pass API), just log matches
-  let matched = 0
-  for (const wl of movieWl) {
-    const keys = idKeys(wl.movie?.ids || {})
-    const plexItem = keys.map((k) => plexByIdKey.get(k)).find(Boolean)
-    if (plexItem) matched++
-  }
-  for (const wl of showWl) {
-    const keys = idKeys(wl.show?.ids || {})
-    const plexItem = keys.map((k) => plexByIdKey.get(k)).find(Boolean)
-    if (plexItem) matched++
-  }
-
-  // Plex -> Trakt: push unwatched items with viewOffset=0 and viewCount=0
-  // that exist in Plex but not in the Trakt watchlist
   const traktWlKeys = new Set<string>()
   for (const wl of movieWl) {
     for (const k of idKeys(wl.movie?.ids || {})) traktWlKeys.add(k)
@@ -536,7 +485,46 @@ async function syncWatchlist(user: any, allPlexItems: PlexItem[], serverUrl: str
     for (const k of idKeys(wl.show?.ids || {})) traktWlKeys.add(k)
   }
 
-  console.log(`[sync]   Watchlist: ${matched} Trakt watchlist items found in Plex library`)
+  // Plex -> Trakt: push unwatched Plex items (no watch history, not already on Trakt watchlist)
+  const moviesToAdd = allPlexItems.filter((item) => {
+    if (item.type !== "movie") return false
+    if (item.viewCount > 0) return false
+    const keys = idKeys(item.ids)
+    return keys.length > 0 && !keys.some((k) => traktWlKeys.has(k))
+  })
+
+  if (moviesToAdd.length > 0) {
+    const body = { movies: moviesToAdd.map((m) => ({ ids: m.ids, title: m.title })) }
+    try {
+      await axios.post(`${TRAKT_API}/sync/watchlist`, body, { headers: hdrs, timeout: 30_000 })
+      console.log(`[sync]   Watchlist: ${moviesToAdd.length} unwatched movie(s) Plex -> Trakt watchlist`)
+    } catch (err: any) {
+      console.warn(`[sync]   Watchlist: failed to push movies to Trakt: ${err.message}`)
+    }
+  }
+
+  // Trakt -> Plex: log which Trakt watchlist items exist in the Plex library
+  const plexByIdKey = new Map<string, PlexItem>()
+  for (const item of allPlexItems) {
+    for (const k of idKeys(item.ids)) plexByIdKey.set(k, item)
+  }
+
+  let matched = 0
+  let notInPlex = 0
+  for (const wl of [...movieWl, ...showWl]) {
+    const ids = wl.movie?.ids || wl.show?.ids || {}
+    const keys = idKeys(ids)
+    if (keys.map((k) => plexByIdKey.get(k)).find(Boolean)) {
+      matched++
+    } else {
+      notInPlex++
+    }
+  }
+
+  console.log(`[sync]   Watchlist: ${matched} Trakt items in Plex library, ${notInPlex} not in library`)
+  if (moviesToAdd.length === 0) {
+    console.log("[sync]   Watchlist: no new items to sync")
+  }
 }
 
 export async function runFullSync(): Promise<void> {
@@ -557,6 +545,8 @@ export async function runFullSync(): Promise<void> {
   console.log(`[sync] Starting full sync for ${users.length} user(s)`)
   emit({ type: "sync_start", data: {}, timestamp: Date.now() })
   const start = Date.now()
+  let grandTotalToTrakt = 0
+  let grandTotalToPlex = 0
 
   for (const rawUser of users) {
     let user = rawUser
@@ -600,6 +590,9 @@ export async function runFullSync(): Promise<void> {
         console.warn(`[sync]   Watchlist sync failed: ${err.message}`)
       }
 
+      grandTotalToTrakt += totalToTrakt
+      grandTotalToPlex += totalToPlex
+
       if (totalToTrakt === 0 && totalToPlex === 0) {
         console.log(`[sync] ${user.plexUsername}: already in sync`)
       } else {
@@ -611,6 +604,6 @@ export async function runFullSync(): Promise<void> {
   }
 
   const duration = Date.now() - start
-  emit({ type: "sync_complete", data: { duration }, timestamp: Date.now() })
+  emit({ type: "sync_complete", data: { duration, toTrakt: grandTotalToTrakt, toPlex: grandTotalToPlex }, timestamp: Date.now() })
   console.log(`[sync] Full sync complete in ${(duration / 1000).toFixed(1)}s`)
 }

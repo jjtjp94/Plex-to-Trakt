@@ -499,8 +499,11 @@
       setupComplete: false,
       statusData: null,
       feedItems: 0,
-      feedMax: 20,
+      feedMax: 50,
     }
+
+    const seenEventKeys = new Set()
+    const MAX_FEED_ITEMS = 50
 
     let currentUserId = null
     let pollInterval = null
@@ -682,6 +685,7 @@
     /* ── Activity Feed ── */
     async function loadActivity() {
       try {
+        seenEventKeys.clear()
         const res = await fetch('/api/activity?limit=50')
         const events = await res.json()
         for (let i = events.length - 1; i >= 0; i--) {
@@ -707,6 +711,10 @@
     }
 
     function addActivityItem(kind, event, isHistorical) {
+      const eventKey = (event.timestamp || 0) + ':' + (event.type || '') + ':' + (event.data?.title || '')
+      if (seenEventKeys.has(eventKey)) return
+      seenEventKeys.add(eventKey)
+
       const feed = document.getElementById('activityFeed')
       const empty = document.getElementById('feedEmpty')
       if (empty) empty.remove()
@@ -715,8 +723,11 @@
       if (label) label.style.display = 'block'
 
       state.feedItems++
-      if (!isHistorical && state.feedItems > state.feedMax) {
-        document.getElementById('feedMore').style.display = 'block'
+
+      // Cap rendered items — remove oldest when exceeding limit
+      const allItems = feed.querySelectorAll('.activity-item')
+      if (allItems.length >= MAX_FEED_ITEMS) {
+        allItems[allItems.length - 1].remove()
       }
 
       const item = document.createElement('div')

@@ -3,6 +3,7 @@ import { prisma } from "./prisma.js"
 import { refreshTraktToken } from "./tokenRefresh.js"
 import { extractAllIds, type PlexItem } from "./plexApi.js"
 import { emit } from "./eventBus.js"
+import { traktHeaders, idKeys } from "./traktUtils.js"
 
 const TRAKT_API = process.env.TRAKT_API_URL || "https://api.trakt.tv"
 const DEFAULT_POLL_MS = 15_000
@@ -18,12 +19,18 @@ interface CachedState {
 
 const stateCache = new Map<string, CachedState>()
 let seeded = false
+let silentPollCount = 0
+let totalCheckedSinceHeartbeat = 0
+const HEARTBEAT_EVERY = 10
 
-function parsePollInterval(): number {
+export function parsePollInterval(): number {
   const raw = process.env.WATCH_POLL_INTERVAL
   if (!raw || raw === "0") return 0
   const seconds = parseInt(raw, 10)
-  if (isNaN(seconds) || seconds <= 0) return DEFAULT_POLL_MS
+  if (isNaN(seconds) || seconds <= 0) {
+    console.warn(`[watch-poll] Invalid WATCH_POLL_INTERVAL="${raw}" — disabling poller. Use a number 5-3600 (seconds) or 0 to disable.`)
+    return 0
+  }
   return seconds * 1000
 }
 
@@ -45,23 +52,6 @@ export function restartPoller() {
     }, pollInterval)
     console.log(`[watch-poll] Restarted with ${pollInterval / 1000}s interval`)
   }
-}
-
-function traktHeaders(user: any) {
-  return {
-    "Content-Type": "application/json",
-    "trakt-api-version": "2",
-    "trakt-api-key": user.traktClientId,
-    Authorization: `Bearer ${user.traktAccessToken}`,
-  }
-}
-
-function idKeys(ids: Record<string, any>): string[] {
-  const keys: string[] = []
-  if (ids.imdb) keys.push(`imdb:${ids.imdb}`)
-  if (ids.tmdb) keys.push(`tmdb:${ids.tmdb}`)
-  if (ids.tvdb) keys.push(`tvdb:${ids.tvdb}`)
-  return keys
 }
 
 async function removeFromTraktPlayback(user: any, ids: Record<string, any>, title: string) {
@@ -195,9 +185,21 @@ async function pollRecentChanges(serverUrl: string) {
 
       if (!seeded) {
         seeded = true
+        silentPollCount = 0
+        totalCheckedSinceHeartbeat = 0
         console.log(`[watch-poll] Seeded cache with ${stateCache.size} recent items`)
       } else if (changes > 0) {
+        silentPollCount = 0
+        totalCheckedSinceHeartbeat = 0
         console.log(`[watch-poll] Checked ${checked} recent items, ${changes} changes synced`)
+      } else {
+        silentPollCount++
+        totalCheckedSinceHeartbeat += checked
+        if (silentPollCount >= HEARTBEAT_EVERY) {
+          console.log(`[watch-poll] Alive — ${silentPollCount} polls, ${totalCheckedSinceHeartbeat} items checked, no changes`)
+          silentPollCount = 0
+          totalCheckedSinceHeartbeat = 0
+        }
       }
     } catch (err: any) {
       console.warn(`[watch-poll] Poll failed for ${user.plexUsername || user.plexId}: ${err.message}`)
