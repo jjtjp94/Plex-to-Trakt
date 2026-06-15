@@ -5,6 +5,7 @@ import { getHistory } from "../services/eventBus.js"
 import { getActiveSessionCount } from "../services/sessionTracker.js"
 import { getSyncSchedulerState } from "../services/syncScheduler.js"
 import { getPollerState } from "../services/watchStatePoller.js"
+import { getRssPollerState } from "../services/rssWatchlistPoller.js"
 
 const router = express.Router()
 
@@ -35,6 +36,7 @@ router.get("/status", async (_req, res) => {
   const wsState = getWebSocketState()
   const syncState = getSyncSchedulerState()
   const pollerState = getPollerState()
+  const rssState = getRssPollerState()
 
   const lastSyncEvent = getHistory()
     .filter((e) => e.type === "sync_complete" || e.type === "sync_error")
@@ -70,6 +72,12 @@ router.get("/status", async (_req, res) => {
       lastPollAt: pollerState.lastPollAt || null,
       seeded: pollerState.seeded,
     },
+    rssPoller: {
+      enabled: rssState.enabled,
+      intervalMs: rssState.intervalMs,
+      lastPollAt: rssState.lastPollAt || null,
+      lastItemCount: rssState.lastItemCount,
+    },
     activeSessions: getActiveSessionCount(),
     settings: {
       syncInterval: process.env.SYNC_INTERVAL || null,
@@ -77,6 +85,7 @@ router.get("/status", async (_req, res) => {
       watchPollInterval: process.env.WATCH_POLL_INTERVAL || null,
       wsEnabled: process.env.WS_ENABLED !== "false",
       introDetection: process.env.INTRO_DETECTION_ENABLED === "true",
+      rssPollInterval: process.env.RSS_POLL_INTERVAL || null,
     },
   })
 })

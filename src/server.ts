@@ -51,6 +51,7 @@ const { startSyncScheduler } = await import("./services/syncScheduler.js")
 const { startWatchStatePoller } = await import("./services/watchStatePoller.js")
 const { startPlexWebSocket } = await import("./services/plexWebSocket.js")
 const { runFullSync } = await import("./services/fullSync.js")
+const { startRssWatchlistPoller } = await import("./services/rssWatchlistPoller.js")
 
 const app = express()
 const PORT = 3000
@@ -119,4 +120,5 @@ app.listen(PORT, async () => {
   startSyncScheduler()
   await startWatchStatePoller()
   await startPlexWebSocket()
+  await startRssWatchlistPoller()
 })

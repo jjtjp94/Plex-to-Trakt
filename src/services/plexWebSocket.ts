@@ -329,7 +329,5 @@ export async function startPlexWebSocket() {
     return
   }
 
-  connectionState = "reconnecting"
-  emitStatus()
   connect(serverUrl, token)
 }

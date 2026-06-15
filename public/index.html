@@ -433,6 +433,10 @@
         <span class="status-dot" id="dotWs"></span>
         <span class="status-label">WS</span>
       </div>
+      <div class="status-indicator" title="RSS Watchlist poller">
+        <span class="status-dot" id="dotRss"></span>
+        <span class="status-label">RSS</span>
+      </div>
     </div>
     <button class="nav-gear" id="gearBtn" title="Settings" aria-label="Settings">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -517,6 +521,36 @@
         <span class="settings-row-label">Intro/credit detection</span>
         <input type="checkbox" class="setting-toggle" id="settingIntroDetection" onchange="saveSetting('INTRO_DETECTION_ENABLED', this.checked ? 'true' : 'false')" />
         <span class="setting-saved" id="savedIntroDetection"></span>
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <h3>Watchlist RSS</h3>
+      <div class="settings-row">
+        <span class="settings-row-label">RSS poll interval</span>
+        <select class="setting-select" id="settingRssPoll" onchange="saveSetting('RSS_POLL_INTERVAL', this.value)">
+          <option value="0">Off</option>
+          <option value="60">60s</option>
+          <option value="120">2m</option>
+          <option value="300">5m</option>
+          <option value="600">10m</option>
+        </select>
+        <span class="setting-saved" id="savedRssPoll"></span>
+      </div>
+      <div class="settings-row" style="flex-direction:column;align-items:flex-start;gap:8px;padding-top:10px">
+        <span class="settings-row-label">Plex Watchlist RSS URL</span>
+        <span style="font-size:12px;color:var(--text-tertiary);line-height:1.5">
+          In Plex, go to <strong>Settings</strong> (wrench icon) &rarr; <strong>Watchlist</strong> &rarr;
+          click <strong>Generate URL</strong> under "Your Watchlist". Paste the URL below.
+        </span>
+        <div style="display:flex;gap:8px;width:100%">
+          <input class="form-input" id="rssUrlInput" placeholder="https://rss.plex.tv/..." style="flex:1;font-size:12px" />
+          <button class="btn btn--primary" style="flex-shrink:0" onclick="saveRssUrl()">Save</button>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;width:100%">
+          <span id="rssUrlStatus" style="font-size:12px;color:var(--text-tertiary)"></span>
+          <button class="btn btn--ghost" id="rssUrlRemoveBtn" style="display:none;font-size:11px;margin-left:auto" onclick="removeRssUrl()">Remove</button>
+        </div>
       </div>
     </div>
 
@@ -905,7 +939,7 @@
       } else if (kind === 'error') {
         title = d.message || 'Sync error'
       } else if (kind === 'ws') {
-        const subs = { library_scan: 'Library scan detected', mark_watched: 'Marked watched', mark_unwatched: 'Marked unwatched', intro_detection: 'Intro/credit detection triggered' }
+        const subs = { library_scan: 'Library scan detected', mark_watched: 'Marked watched', mark_unwatched: 'Marked unwatched', intro_detection: 'Intro/credit detection triggered', rss_watchlist_add: 'Watchlist items added to Trakt', rss_watchlist_remove: 'Watchlist items removed from Trakt' }
         title = d.title || subs[d.subtype] || d.subtype || 'Event'
         meta = subs[d.subtype] || ''
       }
@@ -950,10 +984,18 @@
     }
 
     /* ── Status Dots ── */
+    let lastStatusFetchAt = 0
+
     function updateStatusDots(data) {
       if (data.plex !== undefined) setDot('dotPlex', data.plex === 'connected' ? 'green' : data.plex === 'error' ? 'red' : 'gray')
       if (data.trakt !== undefined) setDot('dotTrakt', data.trakt === 'connected' ? 'green' : data.trakt === 'expired' ? 'yellow' : data.trakt === 'error' ? 'red' : 'gray')
-      if (data.websocket !== undefined) setDot('dotWs', data.websocket === 'connected' ? 'green' : data.websocket === 'reconnecting' ? 'yellow' : 'red')
+      if (data.websocket !== undefined) {
+        if (data.websocket === 'connected') {
+          setDot('dotWs', 'green')
+        } else if (Date.now() - lastStatusFetchAt > 10000) {
+          setDot('dotWs', data.websocket === 'reconnecting' ? 'yellow' : 'red')
+        }
+      }
     }
 
     function setDot(id, color) {
@@ -975,7 +1017,8 @@
 
         setDot('dotPlex', data.plex.connected ? 'green' : 'red')
         setDot('dotTrakt', data.trakt.connected ? 'green' : 'red')
-        setDot('dotWs', data.websocket.connected ? 'green' : data.websocket.state === 'reconnecting' ? 'yellow' : 'red')
+        setDot('dotWs', data.websocket.connected ? 'green' : data.websocket.state === 'reconnecting' ? 'yellow' : data.websocket.state === 'disabled' ? 'gray' : 'red')
+        lastStatusFetchAt = Date.now()
 
         const ps = document.getElementById('settingsPlexStatus')
         ps.textContent = data.plex.connected ? 'Connected' : 'Disconnected'
@@ -994,9 +1037,13 @@
         }
 
         const ws = document.getElementById('settingsWsStatus')
-        ws.textContent = data.websocket.connected ? 'Connected' : data.websocket.state
-        ws.className = 'settings-row-value settings-row-value--' + (data.websocket.connected ? 'green' : 'yellow')
+        const wsLabels = { connected: 'Connected', reconnecting: 'Reconnecting', disconnected: 'Disconnected', disabled: 'Disabled', failed: 'Failed' }
+        ws.textContent = wsLabels[data.websocket.state] || data.websocket.state
+        const wsColor = data.websocket.connected ? 'green' : data.websocket.state === 'disabled' ? '' : data.websocket.state === 'reconnecting' ? 'yellow' : 'red'
+        ws.className = 'settings-row-value' + (wsColor ? ' settings-row-value--' + wsColor : '')
         document.getElementById('settingsWsReconnects').textContent = data.websocket.reconnectCount
+
+        setDot('dotRss', data.rssPoller.enabled ? 'green' : 'gray')
 
         if (data.sync.lastSyncAt) state.lastSyncAt = data.sync.lastSyncAt
         if (data.sync.nextSyncAt) state.nextSyncAt = data.sync.nextSyncAt
@@ -1018,6 +1065,64 @@
         document.getElementById('settingWatchPoll').value = s.WATCH_POLL_INTERVAL || '0'
         document.getElementById('settingWsEnabled').checked = s.WS_ENABLED !== 'false'
         document.getElementById('settingIntroDetection').checked = s.INTRO_DETECTION_ENABLED === 'true'
+        document.getElementById('settingRssPoll').value = s.RSS_POLL_INTERVAL || '0'
+      } catch {}
+
+      loadRssUrlStatus()
+    }
+
+    async function loadRssUrlStatus() {
+      if (!currentUserId) return
+      try {
+        const res = await fetch('/api/settings/rss-url/' + currentUserId)
+        const data = await res.json()
+        const statusEl = document.getElementById('rssUrlStatus')
+        const removeBtn = document.getElementById('rssUrlRemoveBtn')
+        const input = document.getElementById('rssUrlInput')
+        if (data.configured) {
+          statusEl.innerHTML = '<span style="color:var(--success)">Configured: ' + esc(data.maskedUrl) + '</span>'
+          removeBtn.style.display = ''
+          input.placeholder = 'Paste new URL to replace...'
+        } else {
+          statusEl.textContent = 'Not configured'
+          removeBtn.style.display = 'none'
+          input.placeholder = 'https://rss.plex.tv/...'
+        }
+      } catch {}
+    }
+
+    async function saveRssUrl() {
+      const input = document.getElementById('rssUrlInput')
+      const url = input.value.trim()
+      if (!url) return
+
+      const statusEl = document.getElementById('rssUrlStatus')
+      try {
+        const res = await fetch('/api/settings/rss-url/' + currentUserId, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ rssUrl: url }),
+        })
+        const data = await res.json()
+        if (!res.ok) {
+          statusEl.innerHTML = '<span style="color:var(--error)">' + esc(data.error) + '</span>'
+          return
+        }
+        input.value = ''
+        statusEl.innerHTML = '<span style="color:var(--success)">Saved: ' + esc(data.maskedUrl) + '</span>'
+        document.getElementById('rssUrlRemoveBtn').style.display = ''
+      } catch (err) {
+        statusEl.innerHTML = '<span style="color:var(--error)">' + esc(err.message) + '</span>'
+      }
+    }
+
+    async function removeRssUrl() {
+      if (!confirm('Remove your watchlist RSS URL?')) return
+      try {
+        await fetch('/api/settings/rss-url/' + currentUserId, { method: 'DELETE' })
+        document.getElementById('rssUrlStatus').textContent = 'Not configured'
+        document.getElementById('rssUrlRemoveBtn').style.display = 'none'
+        document.getElementById('rssUrlInput').placeholder = 'https://rss.plex.tv/...'
       } catch {}
     }
 
@@ -1042,6 +1147,7 @@
         WATCH_POLL_INTERVAL: 'savedWatchPoll',
         WS_ENABLED: 'savedWsEnabled',
         INTRO_DETECTION_ENABLED: 'savedIntroDetection',
+        RSS_POLL_INTERVAL: 'savedRssPoll',
       }
       const el = document.getElementById(map[key])
       if (!el) return
